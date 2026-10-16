@@ -1,26 +1,117 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #090d16;
+    --surface: #111827;
+    --surface-hover: #1f2937;
+    --border: #1f293d;
+    --foreground: #f3f4f6;
+    --primary: #0e71eb;
+    --primary-hover: #0b5cce;
+    --accent-green: #10b981;
+    --danger: #ef4444;
   }
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-feature-settings: "rlig" 1, "calt" 1;
+  overflow-x: hidden;
+  min-height: 100vh;
 }
+
+/* Custom Scrollbar for Chat & Participants */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.6);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.9);
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-toolbar {
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+}
+
+.glass-card {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* Speaker Glowing Pulse */
+@keyframes speaker-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #10b981, 0 0 15px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px #10b981, 0 0 25px rgba(16, 185, 129, 0.7);
+  }
+}
+
+.active-speaker-ring {
+  animation: speaker-pulse 1.8s infinite ease-in-out;
+}
+
+/* Floating Emoji Reaction Animation */
+@keyframes floatUpAndFade {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-20px) scale(1.2);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(-160px) scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-220px) scale(0.8);
+    opacity: 0;
+  }
+}
+
+.floating-reaction {
+  animation: floatUpAndFade 2.6s forwards cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Audio Wave Visualizer Bars */
+@keyframes audioWave {
+  0%, 100% {
+    height: 4px;
+  }
+  50% {
+    height: 18px;
+  }
+}
+
+.wave-bar-1 { animation: audioWave 0.6s infinite ease-in-out; }
+.wave-bar-2 { animation: audioWave 0.8s infinite ease-in-out 0.15s; }
+.wave-bar-3 { animation: audioWave 0.7s infinite ease-in-out 0.3s; }
+.wave-bar-4 { animation: audioWave 0.9s infinite ease-in-out 0.1s; }
