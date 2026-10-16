@@ -10,6 +10,8 @@ import {
   Check,
   Clock,
   PhoneOff,
+  Volume2,
+  X as CloseIcon,
 } from 'lucide-react';
 import { IMeeting, IMessage, IPeerConnection } from '@/lib/types';
 import { createAudioAnalyser, ICE_SERVERS } from '@/lib/webrtc';
@@ -27,6 +29,12 @@ interface MeetingRoomProps {
   initialStream: MediaStream | null;
   initialAudioMuted: boolean;
   initialVideoOff: boolean;
+}
+
+interface FloatingReaction {
+  id: string;
+  emoji: string;
+  senderName: string;
 }
 
 export default function MeetingRoom({
@@ -63,6 +71,12 @@ export default function MeetingRoom({
   const [pinnedPeerId, setPinnedPeerId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('none');
 
+  // Meeting reactions & Hand raise state
+  const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
+  const [remoteHands, setRemoteHands] = useState<Map<string, boolean>>(new Map());
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
+  const [showAcousticHint, setShowAcousticHint] = useState(true);
+
   // Chat
   const [messages, setMessages] = useState<IMessage[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -94,7 +108,7 @@ export default function MeetingRoom({
     return () => clearInterval(interval);
   }, []);
 
-  // Ensure working local media (fallback reacquisition if stream tracks ended)
+  // Ensure working local media with full echo cancellation constraints
   useEffect(() => {
     let cancelled = false;
 
@@ -113,7 +127,11 @@ export default function MeetingRoom({
         try {
           const fresh = await navigator.mediaDevices.getUserMedia({
             video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: true,
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
           });
 
           if (!cancelled) {
@@ -125,7 +143,6 @@ export default function MeetingRoom({
             });
             setLocalStream(fresh);
 
-            // Update peer connection senders if any exist
             activeCallsRef.current.forEach((call) => {
               const videoSender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
               const freshVideoTrack = fresh.getVideoTracks()[0];
@@ -137,7 +154,7 @@ export default function MeetingRoom({
             });
           }
         } catch (err) {
-          console.warn('[MeetingRoom] Fallback media acquisition notice:', err);
+          console.warn('[MeetingRoom] Fallback media notice:', err);
         }
       }
     }
@@ -251,7 +268,13 @@ export default function MeetingRoom({
 
         // Answer incoming calls from other participants
         peer.on('call', (call: any) => {
-          // Answer with localStream or screen stream if sharing
+          // Prevent duplicate concurrent calls from the same peer (root cause of audio echo)
+          const existingCall = activeCallsRef.current.get(call.peer);
+          if (existingCall && existingCall.open) {
+            console.debug('[WebRTC] Redundant call from existing peer ignored:', call.peer);
+            return;
+          }
+
           const outboundStream = screenStream || localStream;
           call.answer(outboundStream || undefined);
 
@@ -318,7 +341,6 @@ export default function MeetingRoom({
 
   // Signaling & Presence Sync Poll
   useEffect(() => {
-    // Start with 60s ago to discover anyone who joined recently
     let lastSignalTime = Date.now() - 60000;
     let isAlive = true;
 
@@ -338,9 +360,13 @@ export default function MeetingRoom({
             for (const sig of data.signals) {
               if (sig.from === myPeerId) continue;
 
-              // 1. Peer joined -> Initiate WebRTC Call to the peer
+              // 1. Peer joined -> Deterministic call initiation:
+              // Only initiate call if myPeerId < sig.from lexicographically.
+              // This strictly prevents TWO simultaneous calls between the same two devices!
               if (sig.type === 'peer-joined') {
-                if (peerInstanceRef.current && !activeCallsRef.current.has(sig.from)) {
+                const shouldInitiate = myPeerId && myPeerId.localeCompare(sig.from) < 0;
+
+                if (shouldInitiate && peerInstanceRef.current && !activeCallsRef.current.has(sig.from)) {
                   const outboundStream = screenStream || localStream;
                   const call = peerInstanceRef.current.call(sig.from, outboundStream, {
                     metadata: { userId, displayName },
@@ -394,7 +420,48 @@ export default function MeetingRoom({
                 });
               }
 
-              // 3. Peer left the room
+              // 3. Peer sent a reaction emoji
+              else if (sig.type === 'peer-reaction') {
+                const reactionEmoji = sig.payload?.emoji;
+                const sender = sig.payload?.senderName || 'Participant';
+                if (reactionEmoji) {
+                  const newReaction: FloatingReaction = {
+                    id: Math.random().toString(36).substring(2, 9),
+                    emoji: reactionEmoji,
+                    senderName: sender,
+                  };
+                  setFloatingReactions((prev) => [...prev, newReaction]);
+                  setTimeout(() => {
+                    setFloatingReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
+                  }, 2800);
+                }
+              }
+
+              // 4. Peer raised/lowered hand
+              else if (sig.type === 'peer-hand-raise') {
+                const handState = !!sig.payload?.isHandRaised;
+                setRemoteHands((prev) => {
+                  const updated = new Map(prev);
+                  updated.set(sig.from, handState);
+                  return updated;
+                });
+              }
+
+              // 5. Incoming real-time chat message via signal
+              else if (sig.type === 'chat-message') {
+                const incomingMsg = sig.payload?.message;
+                if (incomingMsg && incomingMsg._id) {
+                  setMessages((prev) => {
+                    if (prev.some((m) => m._id === incomingMsg._id)) return prev;
+                    if (activePanel !== 'chat') {
+                      setUnreadCount((c) => c + 1);
+                    }
+                    return [...prev, incomingMsg];
+                  });
+                }
+              }
+
+              // 6. Peer left the room
               else if (sig.type === 'peer-left') {
                 const call = activeCallsRef.current.get(sig.from);
                 if (call) {
@@ -410,9 +477,14 @@ export default function MeetingRoom({
                   updated.delete(sig.from);
                   return updated;
                 });
+                setRemoteHands((prev) => {
+                  const updated = new Map(prev);
+                  updated.delete(sig.from);
+                  return updated;
+                });
               }
 
-              // 4. Host ended meeting
+              // 7. Host ended meeting
               else if (sig.type === 'meeting-ended') {
                 setMeetingEndedNotice('The meeting was ended by the host.');
               }
@@ -420,17 +492,19 @@ export default function MeetingRoom({
           }
         }
 
-        // Sync chat messages
+        // Periodic database message synchronization with ID-based deduplication
         const chatRes = await fetch(`/api/meetings/${meeting.meetingCode}/messages`);
         if (chatRes.ok) {
           const chatData = await chatRes.json();
-          if (chatData.messages) {
+          if (chatData.messages && Array.isArray(chatData.messages)) {
             setMessages((prev) => {
-              if (chatData.messages.length > prev.length) {
+              const existingIds = new Set(prev.map((m) => m._id));
+              const newMsgs = chatData.messages.filter((m: IMessage) => !existingIds.has(m._id));
+              if (newMsgs.length > 0) {
                 if (activePanel !== 'chat') {
-                  setUnreadCount((c) => c + (chatData.messages.length - prev.length));
+                  setUnreadCount((c) => c + newMsgs.length);
                 }
-                return chatData.messages;
+                return [...prev, ...newMsgs];
               }
               return prev;
             });
@@ -450,21 +524,27 @@ export default function MeetingRoom({
       }
     };
 
-    const intervalId = setInterval(syncMeeting, 2500);
+    const intervalId = setInterval(syncMeeting, 2200);
     return () => {
       isAlive = false;
       clearInterval(intervalId);
     };
   }, [meeting.meetingCode, userId, displayName, localStream, screenStream, activePanel]);
 
-  // Audio Toggle (Microphone)
+  // Audio Toggle (Microphone) with AEC constraints
   const handleToggleAudio = async () => {
     let currentAudioTrack = localStream?.getAudioTracks()[0];
 
-    // If audio track is missing or ended, acquire a fresh track
+    // If audio track is missing or ended, acquire a fresh track with echo cancellation
     if (!currentAudioTrack || currentAudioTrack.readyState === 'ended') {
       try {
-        const fresh = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const fresh = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
         const freshTrack = fresh.getAudioTracks()[0];
         if (localStream) {
           localStream.addTrack(freshTrack);
@@ -509,7 +589,6 @@ export default function MeetingRoom({
         }
         currentVideoTrack = freshTrack;
 
-        // If not currently screen sharing, replace track on peer senders
         if (!isScreenSharing) {
           activeCallsRef.current.forEach((call) => {
             const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
@@ -584,7 +663,6 @@ export default function MeetingRoom({
         setScreenStream(displayStream);
         setIsScreenSharing(true);
 
-        // Replace video track with screen track on active peer calls
         activeCallsRef.current.forEach((call) => {
           const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
           if (sender) {
@@ -592,7 +670,6 @@ export default function MeetingRoom({
           }
         });
 
-        // Detect native browser stop sharing bar click
         screenTrack.onended = () => {
           stopScreenShare();
         };
@@ -600,12 +677,13 @@ export default function MeetingRoom({
         sendMediaStateSignal(isVideoOff, isAudioMuted, true);
       } catch (err: any) {
         if (err.name !== 'NotAllowedError') {
-          console.warn('Screen share error:', err);
+          console.warn('Screen share notice:', err);
         }
       }
     }
   };
 
+  // Send Chat Message with immediate signal broadcast & persistence
   const handleSendMessage = async (text: string) => {
     try {
       const res = await fetch(`/api/meetings/${meeting.meetingCode}/messages`, {
@@ -620,15 +698,80 @@ export default function MeetingRoom({
 
       if (res.ok) {
         const data = await res.json();
-        setMessages((prev) => [...prev, data.message]);
+        const savedMessage: IMessage = data.message;
+
+        // 1. Add locally
+        setMessages((prev) => {
+          if (prev.some((m) => m._id === savedMessage._id)) return prev;
+          return [...prev, savedMessage];
+        });
+
+        // 2. Broadcast immediately via signaling for real-time delivery
+        const myPeerId = peerInstanceRef.current?.id;
+        if (myPeerId) {
+          fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: myPeerId,
+              type: 'chat-message',
+              payload: { message: savedMessage },
+            }),
+          }).catch(console.warn);
+        }
       }
     } catch (err) {
       console.warn('Failed to send message:', err);
     }
   };
 
+  // Send Meeting Reaction (Emoji)
+  const handleSendReaction = (emoji: string) => {
+    const newReaction: FloatingReaction = {
+      id: Math.random().toString(36).substring(2, 9),
+      emoji,
+      senderName: displayName,
+    };
+
+    setFloatingReactions((prev) => [...prev, newReaction]);
+    setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
+    }, 2800);
+
+    const myPeerId = peerInstanceRef.current?.id;
+    if (myPeerId) {
+      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: myPeerId,
+          type: 'peer-reaction',
+          payload: { emoji, senderName: displayName },
+        }),
+      }).catch(console.warn);
+    }
+  };
+
+  // Toggle Hand Raise
+  const handleToggleHandRaise = () => {
+    const nextState = !isLocalHandRaised;
+    setIsLocalHandRaised(nextState);
+
+    const myPeerId = peerInstanceRef.current?.id;
+    if (myPeerId) {
+      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: myPeerId,
+          type: 'peer-hand-raise',
+          payload: { isHandRaised: nextState },
+        }),
+      }).catch(console.warn);
+    }
+  };
+
   const handleLeaveMeeting = async () => {
-    // 1. Broadcast peer-left signal
     const myPeerId = peerInstanceRef.current?.id;
     if (myPeerId) {
       fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
@@ -642,7 +785,6 @@ export default function MeetingRoom({
       }).catch(console.warn);
     }
 
-    // 2. Stop all local tracks
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
     }
@@ -653,7 +795,6 @@ export default function MeetingRoom({
       screenStream.getTracks().forEach((track) => track.stop());
     }
 
-    // 3. Destroy peer connection
     if (peerInstanceRef.current) {
       try {
         peerInstanceRef.current.destroy();
@@ -793,9 +934,46 @@ export default function MeetingRoom({
         </div>
       </header>
 
+      {/* Unobtrusive acoustic feedback hint for multi-device testing */}
+      {showAcousticHint && totalParticipantCount > 1 && (
+        <div className="bg-[#16181f] border-b border-[#242732] px-4 py-1.5 flex items-center justify-between text-[11px] text-slate-400 z-20">
+          <div className="flex items-center space-x-2">
+            <Volume2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+            <span>
+              Joining with multiple devices in the same room? Use headphones or mute one device to avoid acoustic feedback.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowAcousticHint(false)}
+            className="p-0.5 hover:text-white rounded hover:bg-[#1e212b] transition"
+            title="Dismiss"
+          >
+            <CloseIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Main Stage & Panels */}
       <div className="flex-1 flex overflow-hidden relative">
-        <main className="flex-1 p-3 sm:p-5 overflow-y-auto pb-24 flex flex-col items-center justify-center">
+        <main className="flex-1 p-3 sm:p-5 overflow-y-auto pb-24 flex flex-col items-center justify-center relative">
+          {/* FLOATING REACTIONS OVERLAY */}
+          {floatingReactions.length > 0 && (
+            <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
+              {floatingReactions.map((r, i) => (
+                <div
+                  key={r.id}
+                  className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-[#16181f]/90 border border-[#2a2d38] backdrop-blur px-3 py-1.5 rounded-full shadow-2xl animate-in slide-in-from-bottom-6 fade-in duration-300"
+                  style={{
+                    transform: `translate(${Math.sin(i * 1.5) * 60}px, -${i * 45}px)`,
+                  }}
+                >
+                  <span className="text-2xl animate-bounce">{r.emoji}</span>
+                  <span className="text-xs text-slate-300 font-medium">{r.senderName}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* SCREEN SHARING HERO VIEW */}
           {isAnyoneScreenSharing ? (
             <div className="w-full h-full max-w-7xl flex flex-col space-y-3">
@@ -810,10 +988,12 @@ export default function MeetingRoom({
                     className="w-full h-full object-contain"
                   />
                 ) : (
+                  // Muted on remote screen video: remote audio is played cleanly by the participant's VideoTile
                   <video
                     ref={remoteScreenVideoRef}
                     autoPlay
                     playsInline
+                    muted
                     className="w-full h-full object-contain"
                   />
                 )}
@@ -849,6 +1029,7 @@ export default function MeetingRoom({
                     isAudioMuted={isAudioMuted}
                     isVideoOff={isVideoOff}
                     isSpeaking={isLocalSpeaking}
+                    isHandRaised={isLocalHandRaised}
                     isPinned={pinnedPeerId === 'local'}
                     onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
                   />
@@ -865,6 +1046,7 @@ export default function MeetingRoom({
                       isAudioMuted={peer.isAudioMuted}
                       isVideoOff={peer.isVideoOff}
                       isSpeaking={peer.isSpeaking}
+                      isHandRaised={!!remoteHands.get(peer.peerId)}
                       isPinned={pinnedPeerId === peer.peerId}
                       onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
                     />
@@ -883,6 +1065,7 @@ export default function MeetingRoom({
                 isAudioMuted={isAudioMuted}
                 isVideoOff={isVideoOff}
                 isSpeaking={isLocalSpeaking}
+                isHandRaised={isLocalHandRaised}
                 isPinned={pinnedPeerId === 'local'}
                 onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
               />
@@ -897,6 +1080,7 @@ export default function MeetingRoom({
                   isAudioMuted={peer.isAudioMuted}
                   isVideoOff={peer.isVideoOff}
                   isSpeaking={peer.isSpeaking}
+                  isHandRaised={!!remoteHands.get(peer.peerId)}
                   isPinned={pinnedPeerId === peer.peerId}
                   onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
                 />
@@ -948,6 +1132,7 @@ export default function MeetingRoom({
         participantCount={totalParticipantCount}
         unreadCount={unreadCount}
         activePanel={activePanel}
+        isHandRaised={isLocalHandRaised}
         onToggleAudio={handleToggleAudio}
         onToggleVideo={handleToggleVideo}
         onToggleScreenShare={handleToggleScreenShare}
@@ -955,6 +1140,8 @@ export default function MeetingRoom({
           setActivePanel(activePanel === panel ? 'none' : panel);
           if (panel === 'chat') setUnreadCount(0);
         }}
+        onSendReaction={handleSendReaction}
+        onToggleHandRaise={handleToggleHandRaise}
         onLeaveMeeting={handleLeaveMeeting}
         onEndMeetingForAll={isHost ? handleEndMeetingForAll : undefined}
       />

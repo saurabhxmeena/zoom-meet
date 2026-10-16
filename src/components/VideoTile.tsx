@@ -12,6 +12,7 @@ interface VideoTileProps {
   isVideoOff?: boolean;
   isSpeaking?: boolean;
   isPinned?: boolean;
+  isHandRaised?: boolean;
   onTogglePin?: () => void;
 }
 
@@ -24,6 +25,7 @@ export default function VideoTile({
   isVideoOff = false,
   isSpeaking = false,
   isPinned = false,
+  isHandRaised = false,
   onTogglePin,
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -36,24 +38,38 @@ export default function VideoTile({
       if (videoEl.srcObject !== stream) {
         videoEl.srcObject = stream;
       }
-      videoEl.muted = isLocal;
-      if (!isVideoOff) {
-        videoEl.play().catch((err) => {
-          // Playback might need a user gesture if unmuted remote stream
-          console.debug('[VideoTile] play interrupted or pending gesture:', err?.name);
-        });
-      }
+      // Local stream is always muted to prevent local loopback feedback.
+      // Remote stream is muted if the peer is marked audio-muted.
+      videoEl.muted = isLocal || isAudioMuted;
+
+      // Always initiate playback when stream is set so audio transmits even if camera is disabled
+      videoEl.play().catch((err) => {
+        console.debug('[VideoTile] Play notice:', err?.name);
+      });
     } else {
       videoEl.srcObject = null;
     }
-  }, [stream, isVideoOff, isLocal]);
 
-  const initials = displayName
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((s) => s[0].toUpperCase())
-    .join('') || 'U';
+    return () => {
+      // Clean up on unmount or stream change to avoid lingering background audio
+      if (videoEl) {
+        try {
+          videoEl.pause();
+          videoEl.srcObject = null;
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [stream, isVideoOff, isLocal, isAudioMuted]);
+
+  const initials =
+    displayName
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0].toUpperCase())
+      .join('') || 'U';
 
   const isActuallySpeaking = isSpeaking && !isAudioMuted;
 
@@ -72,7 +88,7 @@ export default function VideoTile({
         ref={videoRef}
         autoPlay
         playsInline
-        muted={isLocal}
+        muted={isLocal || isAudioMuted}
         className={`w-full h-full object-cover ${
           isLocal ? 'transform -scale-x-100' : ''
         } ${isVideoOff || !stream ? 'hidden' : 'block'}`}
@@ -87,6 +103,14 @@ export default function VideoTile({
           <span className="text-xs text-[#8e929b] max-w-[140px] truncate font-normal">
             {displayName}
           </span>
+        </div>
+      )}
+
+      {/* Raised Hand Pill at Top Left */}
+      {isHandRaised && (
+        <div className="absolute top-2.5 left-2.5 z-20 flex items-center space-x-1.5 bg-[#f59e0b]/20 border border-[#f59e0b]/50 px-2 py-0.5 rounded-md text-xs text-[#fef3c7] animate-in fade-in zoom-in duration-150">
+          <span className="text-sm">✋</span>
+          <span className="font-medium text-[11px]">Raised Hand</span>
         </div>
       )}
 
@@ -107,10 +131,9 @@ export default function VideoTile({
 
       {/* Identity Pill at Bottom Left */}
       <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center space-x-1.5 bg-[#0e1015]/85 px-2.5 py-1 rounded-md border border-[#242732] text-xs text-[#f1f2f4] pointer-events-none max-w-[85%]">
-        
         {/* Speaking Dot */}
         {isActuallySpeaking && (
-          <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] shrink-0" />
+          <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] shrink-0 animate-pulse" />
         )}
 
         <span className="font-normal truncate">{displayName}</span>

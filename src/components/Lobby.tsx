@@ -47,7 +47,11 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         setStream(localStream);
         if (videoRef.current) {

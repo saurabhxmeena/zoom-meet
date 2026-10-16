@@ -47,8 +47,8 @@ export async function POST(
     }
 
     const payload = getUserFromRequest(req);
-    const resolvedUserId = payload ? payload.userId : senderUserId || 'guest_user';
-    const resolvedName = payload ? payload.displayName : senderName || 'Participant';
+    const resolvedUserId = senderUserId || (payload ? payload.userId : 'guest_user');
+    const resolvedName = (senderName && senderName.trim()) || (payload ? payload.displayName : 'Participant');
 
     const message = await addMessage({
       meetingId: meeting._id,
