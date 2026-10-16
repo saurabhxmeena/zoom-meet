@@ -32,7 +32,8 @@ export async function POST(
       payload,
       timestamp,
     });
-    const cutoff = timestamp - 60000;
+    // Keep last 2 minutes (120s) of signaling messages
+    const cutoff = timestamp - 120000;
     const filtered = queue.filter((item) => item.timestamp > cutoff);
     inMemoryStore.signals.set(code, filtered);
 
@@ -68,6 +69,7 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const peerId = searchParams.get('peerId')?.trim();
     const since = parseInt(searchParams.get('since') || '0', 10);
+    const now = Date.now();
 
     try {
       const dbReady = await connectDB();
@@ -78,7 +80,7 @@ export async function GET(
         };
         if (peerId) {
           query.from = { $ne: peerId };
-          query.$or = [{ to: 'all' }, { to: peerId }];
+          query.$or = [{ to: 'all' }, { to: peerId }, { to: { $exists: false } }, { to: null }];
         }
 
         const docs = await SignalModel.find(query).sort({ createdAt: 1 }).lean();
@@ -90,7 +92,7 @@ export async function GET(
           timestamp: new Date(doc.createdAt).getTime(),
         }));
 
-        return NextResponse.json({ signals: messages, serverTime: Date.now() });
+        return NextResponse.json({ signals: messages, serverTime: now });
       }
     } catch (dbErr) {
       console.warn('[Signal Route] DB signal fetch fallback:', dbErr);
@@ -99,10 +101,13 @@ export async function GET(
     // In-memory fallback
     const queue = inMemoryStore.signals.get(code) || [];
     const messages = queue.filter(
-      (item) => item.timestamp > since && (!peerId || item.from !== peerId) && (item.to === 'all' || item.to === peerId)
+      (item) =>
+        item.timestamp > since &&
+        (!peerId || item.from !== peerId) &&
+        (!item.to || item.to === 'all' || item.to === peerId)
     );
 
-    return NextResponse.json({ signals: messages, serverTime: Date.now() });
+    return NextResponse.json({ signals: messages, serverTime: now });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

@@ -55,6 +55,7 @@ export default function VideoTile({
   }, [stream]);
 
   // Attach and play video stream when stream reference changes
+  // Video elements are strictly visual-only (always muted) to eliminate duplicate playback & echo.
   useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -63,7 +64,7 @@ export default function VideoTile({
       if (videoEl.srcObject !== stream) {
         videoEl.srcObject = stream;
       }
-      videoEl.muted = isLocal || isAudioMuted;
+      videoEl.muted = true;
       videoEl.play().catch((err) => {
         console.debug('[VideoTile] Video play notice:', err?.name);
       });
@@ -72,7 +73,7 @@ export default function VideoTile({
     }
 
     return () => {
-      if (!stream && videoEl) {
+      if (videoEl) {
         try {
           videoEl.pause();
           videoEl.srcObject = null;
@@ -81,9 +82,9 @@ export default function VideoTile({
         }
       }
     };
-  }, [stream, isLocal, isAudioMuted]);
+  }, [stream]);
 
-  // For remote streams, also maintain dedicated audio element to guarantee playback
+  // For remote streams, dedicated audio element is the SOLE audio playback sink.
   useEffect(() => {
     const audioEl = audioRef.current;
     if (!audioEl) return;
@@ -101,7 +102,7 @@ export default function VideoTile({
     }
 
     return () => {
-      if (!stream && audioEl) {
+      if (audioEl) {
         try {
           audioEl.pause();
           audioEl.srcObject = null;
@@ -115,12 +116,12 @@ export default function VideoTile({
   // Synchronize muted states reactively without detaching or pausing stream
   useEffect(() => {
     if (videoRef.current) {
-      videoRef.current.muted = isLocal || isAudioMuted;
+      videoRef.current.muted = true;
     }
     if (audioRef.current) {
-      audioRef.current.muted = isLocal || isAudioMuted;
+      audioRef.current.muted = isAudioMuted;
     }
-  }, [isLocal, isAudioMuted]);
+  }, [isAudioMuted]);
 
   // When unhiding video (video becomes active), ensure video element is playing
   useEffect(() => {
@@ -152,12 +153,12 @@ export default function VideoTile({
           : 'border border-[#242732]'
       }`}
     >
-      {/* Video Element - kept in DOM so hardware pipeline is never throttled */}
+      {/* Video Element - strictly visual, always muted to eliminate echo and duplicate playback */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={isLocal || isAudioMuted}
+        muted={true}
         className={`w-full h-full transition-opacity duration-200 ${
           fitMode === 'contain' ? 'object-contain bg-black' : 'object-cover object-center'
         } ${shouldMirror ? 'transform -scale-x-100' : ''} ${
@@ -165,7 +166,7 @@ export default function VideoTile({
         }`}
       />
 
-      {/* Dedicated audio element for remote stream playback */}
+      {/* Dedicated audio element: single authoritative output for remote stream playback */}
       {!isLocal && (
         <audio
           ref={audioRef}

@@ -158,6 +158,29 @@ html, body {
   }
 }
 
+/* Date & Time Picker Controls - High contrast & visible native icons */
+input[type="date"],
+input[type="time"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.9) brightness(1.2);
+  opacity: 0.85;
+  border-radius: 4px;
+  padding: 2px;
+  transition: opacity 0.15s ease, filter 0.15s ease, transform 0.15s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  filter: invert(1) brightness(1.3);
+  transform: scale(1.08);
+}
+
 /* Smooth floating reaction animation for meeting room */
 @keyframes floatUpReaction {
   0% {

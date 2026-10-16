@@ -8,13 +8,12 @@ import {
   Check,
   Clock,
   PhoneOff,
-  Volume2,
   X as CloseIcon,
   ExternalLink,
   AlertCircle,
 } from 'lucide-react';
 import { IMeeting, IMessage, IPeerConnection } from '@/lib/types';
-import { createAudioAnalyser, ICE_SERVERS, acquireCameraTrack, acquireAudioTrack } from '@/lib/webrtc';
+import { createAudioAnalyser, ICE_SERVERS, acquireCameraTrack, acquireAudioTrack, checkCanSwitchCamera } from '@/lib/webrtc';
 import VideoTile from './VideoTile';
 import MeetingControls from './MeetingControls';
 import FloatingSidebar from './FloatingSidebar';
@@ -85,6 +84,7 @@ export default function MeetingRoom({
   // Peer management
   const [peers, setPeers] = useState<Map<string, IPeerConnection>>(new Map());
   const peerInstanceRef = useRef<any>(null);
+  const localPeerIdRef = useRef<string>('');
   const activeCallsRef = useRef<Map<string, any>>(new Map());
 
   // Meeting view & pin state
@@ -104,7 +104,7 @@ export default function MeetingRoom({
   const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
   const [remoteHands, setRemoteHands] = useState<Map<string, boolean>>(new Map());
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
-  const [showAcousticHint, setShowAcousticHint] = useState(true);
+  const [canSwitchCamera, setCanSwitchCamera] = useState(false);
 
   // Chat
   const [messages, setMessages] = useState<IMessage[]>([]);
@@ -129,6 +129,28 @@ export default function MeetingRoom({
     if (localStream) {
       localStream.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
     }
+  }, [localStream]);
+
+  // Detect if client is a smartphone with front & rear camera capability
+  useEffect(() => {
+    let isMounted = true;
+    const evaluateCameraCapability = async () => {
+      const supported = await checkCanSwitchCamera();
+      if (isMounted) setCanSwitchCamera(supported);
+    };
+
+    evaluateCameraCapability();
+
+    if (navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', evaluateCameraCapability);
+    }
+
+    return () => {
+      isMounted = false;
+      if (navigator.mediaDevices?.removeEventListener) {
+        navigator.mediaDevices.removeEventListener('devicechange', evaluateCameraCapability);
+      }
+    };
   }, [localStream]);
 
   // Master function to stop and release all media hardware tracks on leaving
@@ -383,6 +405,107 @@ export default function MeetingRoom({
     [meeting.meetingCode, userId, displayName]
   );
 
+  const logDiagnostic = (tag: string, data: any) => {
+    try {
+      fetch('/api/diagnostics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag, data, time: Date.now() }),
+      }).catch(() => {});
+    } catch {}
+  };
+
+  // Helper to initiate outbound peer call with active media streams
+  const initiateCallToPeer = useCallback((targetPeerId: string, metadataPayload?: any) => {
+    const peer = peerInstanceRef.current;
+    if (!peer || !peer.open || peer.destroyed) {
+      logDiagnostic('call-postponed-peer-not-ready', { targetPeerId, open: peer?.open });
+      return;
+    }
+
+    const existingCall = activeCallsRef.current.get(targetPeerId);
+    if (existingCall && existingCall.open) {
+      return;
+    }
+    if (existingCall) {
+      try { existingCall.close(); } catch {}
+    }
+
+    logDiagnostic('initiating-call', { targetPeerId });
+    const outboundStream = screenStreamRef.current || localStreamRef.current;
+    try {
+      const call = peer.call(targetPeerId, outboundStream || undefined, {
+        metadata: { userId, clientSessionId, displayName },
+      });
+
+      if (call) {
+        call.on('stream', (remoteStream: MediaStream) => {
+          logDiagnostic('call-stream-received', { targetPeerId, trackCount: remoteStream.getTracks().length });
+          setPeers((prev) => {
+            const updated = new Map(prev);
+            const existing = prev.get(targetPeerId);
+            updated.set(targetPeerId, {
+              peerId: targetPeerId,
+              userId: metadataPayload?.userId || targetPeerId,
+              displayName: metadataPayload?.displayName || 'Participant',
+              stream: remoteStream,
+              isAudioMuted: metadataPayload?.isAudioMuted ?? existing?.isAudioMuted ?? false,
+              isVideoOff: metadataPayload?.isVideoOff ?? existing?.isVideoOff ?? false,
+              isScreenSharing: metadataPayload?.isScreenSharing ?? existing?.isScreenSharing ?? false,
+            });
+            return updated;
+          });
+        });
+
+        call.on('close', () => {
+          setPeers((prev) => {
+            const updated = new Map(prev);
+            updated.delete(targetPeerId);
+            return updated;
+          });
+          activeCallsRef.current.delete(targetPeerId);
+        });
+
+        call.on('error', (callErr: any) => {
+          logDiagnostic('outbound-call-error', { targetPeerId, err: String(callErr) });
+          activeCallsRef.current.delete(targetPeerId);
+        });
+
+        activeCallsRef.current.set(targetPeerId, call);
+      }
+    } catch (err) {
+      logDiagnostic('call-exception', { targetPeerId, err: String(err) });
+    }
+
+    // Connect DataChannel if not open
+    if (!activeDataConnectionsRef.current.has(targetPeerId)) {
+      try {
+        const conn = peer.connect(targetPeerId);
+        conn.on('open', () => {
+          activeDataConnectionsRef.current.set(targetPeerId, conn);
+        });
+        conn.on('data', (data: any) => {
+          if (!data) return;
+          if (data.type === 'chat-message' && data.message) {
+            const incomingMsg = data.message;
+            setMessages((prev) => {
+              if (prev.some((m) => m._id === incomingMsg._id)) return prev;
+              if (activePanelRef.current !== 'chat') {
+                setUnreadCount((c) => c + 1);
+              }
+              return [...prev, incomingMsg];
+            });
+          }
+        });
+        conn.on('close', () => {
+          activeDataConnectionsRef.current.delete(targetPeerId);
+        });
+      } catch (dcErr) {
+        console.debug('DataChannel connect notice:', dcErr);
+      }
+    }
+  }, [userId, clientSessionId, displayName]);
+
   // Initialize WebRTC Peer connection
   useEffect(() => {
     let peer: any = null;
@@ -390,11 +513,19 @@ export default function MeetingRoom({
 
     async function initWebRTC() {
       try {
-        const PeerClass = (await import('peerjs')).default;
+        const peerModule = (await import('peerjs')) as any;
+        let PeerClass: any = peerModule.default?.Peer || peerModule.Peer || peerModule.default || peerModule;
+        if (typeof PeerClass !== 'function' && typeof PeerClass?.default === 'function') {
+          PeerClass = PeerClass.default;
+        }
+
         const cleanMeetingCode = meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '');
         const cleanUserId = userId.replace(/[^a-zA-Z0-9]/g, '').slice(-5);
-        const sessionSuffix = (clientSessionId || Math.random().toString(36).substring(2, 8)).slice(-5);
-        const myPeerId = `meet_${cleanMeetingCode}_${cleanUserId}_${sessionSuffix}`;
+        const randomSuffix = Math.random().toString(36).substring(2, 9);
+        const myPeerId = `meet_${cleanMeetingCode}_${cleanUserId}_${randomSuffix}`;
+        localPeerIdRef.current = myPeerId;
+
+        logDiagnostic('initWebRTC-start', { myPeerId, userId, clientSessionId });
 
         let resolvedIceServers = ICE_SERVERS;
         try {
@@ -419,7 +550,11 @@ export default function MeetingRoom({
         peerInstanceRef.current = peer;
 
         peer.on('open', (id: string) => {
+          logDiagnostic('peer-open-event', { id, isSubscribed });
           if (!isSubscribed) return;
+          localPeerIdRef.current = id;
+
+          // Announce presence
           fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -472,10 +607,10 @@ export default function MeetingRoom({
         });
 
         peer.on('call', (call: any) => {
+          logDiagnostic('peer-incoming-call', { caller: call.peer });
           const existingCall = activeCallsRef.current.get(call.peer);
-          if (existingCall && existingCall.open) {
-            console.debug('[WebRTC] Redundant call from existing peer ignored:', call.peer);
-            return;
+          if (existingCall) {
+            try { existingCall.close(); } catch {}
           }
 
           // Always use active stream ref to prevent stale empty stream
@@ -483,6 +618,7 @@ export default function MeetingRoom({
           call.answer(outboundStream || undefined);
 
           call.on('stream', (remoteStream: MediaStream) => {
+            logDiagnostic('peer-call-stream-received', { caller: call.peer, trackCount: remoteStream.getTracks().length });
             if (!isSubscribed) return;
             const callerDisplayName = call.metadata?.displayName || 'Participant';
             setPeers((prev) => {
@@ -511,13 +647,26 @@ export default function MeetingRoom({
             activeCallsRef.current.delete(call.peer);
           });
 
+          call.on('error', (err: any) => {
+            logDiagnostic('incoming-call-error', { caller: call.peer, err: String(err) });
+            activeCallsRef.current.delete(call.peer);
+          });
+
           activeCallsRef.current.set(call.peer, call);
         });
 
         peer.on('error', (err: any) => {
+          logDiagnostic('peer-error-event', { err: String(err), type: err?.type, message: err?.message });
           console.warn('[WebRTC Peer]:', err.type || err);
+          if (err.type === 'unavailable-id' && isSubscribed) {
+            // Re-initialize with a fresh random ID
+            setTimeout(() => {
+              if (isSubscribed) initWebRTC();
+            }, 800);
+          }
         });
       } catch (err) {
+        logDiagnostic('initWebRTC-exception', { err: String(err) });
         console.error('Failed to initialize WebRTC Peer:', err);
       }
     }
@@ -525,6 +674,7 @@ export default function MeetingRoom({
     initWebRTC();
 
     return () => {
+      logDiagnostic('initWebRTC-cleanup', { hasPeer: !!peer });
       isSubscribed = false;
       if (peer) {
         try {
@@ -554,17 +704,35 @@ export default function MeetingRoom({
 
   // Signaling & Presence Sync Poll
   useEffect(() => {
-    let lastSignalTime = Date.now() - 60000;
+    let lastSignalTime = Date.now() - 120000;
     let isAlive = true;
+    let lastPresenceBroadcast = 0;
 
     const syncMeeting = async () => {
       if (!isAlive) return;
 
-      // 1. Real-time Signaling Sync
+      const myPeerId = peerInstanceRef.current?.id || localPeerIdRef.current || '';
+
+      // 1. Periodic presence announcement (every ~10s) so new joining devices discover us
+      if (myPeerId && peerInstanceRef.current?.open && Date.now() - lastPresenceBroadcast > 10000) {
+        lastPresenceBroadcast = Date.now();
+        fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: myPeerId,
+            senderSessionId: clientSessionId,
+            type: 'peer-presence',
+            payload: { userId, clientSessionId, displayName, isAudioMuted, isVideoOff, isScreenSharing },
+          }),
+        }).catch(() => {});
+      }
+
+      // 2. Real-time Signaling Sync
       try {
-        const myPeerId = peerInstanceRef.current?.id || clientSessionId || userId;
+        const queryPeerId = myPeerId || clientSessionId || userId;
         const res = await fetch(
-          `/api/meetings/${meeting.meetingCode}/signal?peerId=${myPeerId || ''}&since=${lastSignalTime}`
+          `/api/meetings/${meeting.meetingCode}/signal?peerId=${encodeURIComponent(queryPeerId)}&since=${lastSignalTime}`
         );
 
         if (res.ok) {
@@ -573,77 +741,41 @@ export default function MeetingRoom({
 
           if (data.signals && data.signals.length > 0) {
             for (const sig of data.signals) {
-              if (sig.from === myPeerId || (clientSessionId && sig.from === clientSessionId)) continue;
+              if (
+                sig.from === myPeerId ||
+                sig.from === localPeerIdRef.current ||
+                (clientSessionId && sig.from === clientSessionId)
+              ) {
+                continue;
+              }
 
-              // 1. Peer joined -> Deterministic call initiation & DataConnection
-              if (sig.type === 'peer-joined') {
-                const shouldInitiate = myPeerId && myPeerId.localeCompare(sig.from) < 0;
+              // 1. Peer joined or presence announcement -> Deterministic call initiation & DataConnection
+              if (sig.type === 'peer-joined' || sig.type === 'peer-presence') {
+                // If a new peer joined, immediately send presence response back to them
+                if (sig.type === 'peer-joined' && myPeerId && myPeerId !== sig.from) {
+                  fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      from: myPeerId,
+                      to: sig.from,
+                      type: 'peer-presence',
+                      payload: { userId, clientSessionId, displayName, isAudioMuted, isVideoOff, isScreenSharing },
+                    }),
+                  }).catch(() => {});
+                }
 
-                if (shouldInitiate && peerInstanceRef.current) {
-                  if (!activeCallsRef.current.has(sig.from)) {
-                    const outboundStream = screenStreamRef.current || localStreamRef.current;
-                    const call = peerInstanceRef.current.call(sig.from, outboundStream, {
-                      metadata: { userId, clientSessionId, displayName },
-                    });
-
-                    if (call) {
-                      call.on('stream', (remoteStream: MediaStream) => {
-                        setPeers((prev) => {
-                          const updated = new Map(prev);
-                          const existing = prev.get(sig.from);
-                          updated.set(sig.from, {
-                            peerId: sig.from,
-                            userId: sig.payload?.userId || sig.from,
-                            displayName: sig.payload?.displayName || 'Participant',
-                            stream: remoteStream,
-                            isAudioMuted: sig.payload?.isAudioMuted ?? existing?.isAudioMuted ?? false,
-                            isVideoOff: sig.payload?.isVideoOff ?? existing?.isVideoOff ?? false,
-                            isScreenSharing: sig.payload?.isScreenSharing ?? existing?.isScreenSharing ?? false,
-                          });
-                          return updated;
-                        });
-                      });
-
-                      call.on('close', () => {
-                        setPeers((prev) => {
-                          const updated = new Map(prev);
-                          updated.delete(sig.from);
-                          return updated;
-                        });
-                        activeCallsRef.current.delete(sig.from);
-                      });
-
-                      activeCallsRef.current.set(sig.from, call);
+                // Deterministic tie-breaker for call initiation
+                const shouldInitiate = !myPeerId || !sig.from ? false : myPeerId.localeCompare(sig.from) < 0;
+                if (shouldInitiate) {
+                  initiateCallToPeer(sig.from, sig.payload);
+                } else if (!activeCallsRef.current.has(sig.from) && peerInstanceRef.current?.open) {
+                  // Fallback: If not connected after 3.5s, initiate to prevent deadlock
+                  setTimeout(() => {
+                    if (isAlive && !activeCallsRef.current.has(sig.from) && peerInstanceRef.current?.open) {
+                      initiateCallToPeer(sig.from, sig.payload);
                     }
-                  }
-
-                  // Establish direct WebRTC DataChannel connection
-                  if (!activeDataConnectionsRef.current.has(sig.from)) {
-                    try {
-                      const conn = peerInstanceRef.current.connect(sig.from);
-                      conn.on('open', () => {
-                        activeDataConnectionsRef.current.set(sig.from, conn);
-                      });
-                      conn.on('data', (data: any) => {
-                        if (!isAlive || !data) return;
-                        if (data.type === 'chat-message' && data.message) {
-                          const incomingMsg = data.message;
-                          setMessages((prev) => {
-                            if (prev.some((m) => m._id === incomingMsg._id)) return prev;
-                            if (activePanelRef.current !== 'chat') {
-                              setUnreadCount((c) => c + 1);
-                            }
-                            return [...prev, incomingMsg];
-                          });
-                        }
-                      });
-                      conn.on('close', () => {
-                        activeDataConnectionsRef.current.delete(sig.from);
-                      });
-                    } catch (dcErr) {
-                      console.debug('DataChannel connect notice:', dcErr);
-                    }
-                  }
+                  }, 3500);
                 }
               }
 
@@ -913,12 +1045,27 @@ export default function MeetingRoom({
   // Flip camera (front selfie <-> rear environment for smartphones)
   const handleFlipCamera = async () => {
     const nextFacing = facingMode === 'user' ? 'environment' : 'user';
+    const currentTracks = localStreamRef.current ? localStreamRef.current.getTracks() : [];
+    const oldVideoTracks = currentTracks.filter((t) => t.kind === 'video');
+
     try {
       const freshTrack = await acquireCameraTrack(nextFacing);
-      if (!freshTrack) return;
+      if (!freshTrack) {
+        setMediaErrorNotice(`Could not switch to ${nextFacing === 'environment' ? 'rear' : 'front'} camera. Retaining active camera.`);
+        setTimeout(() => setMediaErrorNotice(null), 4000);
+        return;
+      }
+
+      // Cleanly stop old camera tracks to turn off previous camera hardware and avoid leaks
+      oldVideoTracks.forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+        allMediaTracksRef.current.delete(track);
+      });
+
       allMediaTracksRef.current.add(freshTrack);
 
-      const currentTracks = localStreamRef.current ? localStreamRef.current.getTracks() : [];
       const nonVideoTracks = currentTracks.filter((t) => t.kind !== 'video');
       const newStream = new MediaStream([...nonVideoTracks, freshTrack]);
       localStreamRef.current = newStream;
@@ -938,10 +1085,14 @@ export default function MeetingRoom({
           }
         });
       }
+
+      sendMediaStateSignal(false, isAudioMuted, isScreenSharing);
       setMediaErrorNotice(null);
     } catch (err) {
       console.warn('Flip camera error:', err);
-      setMediaErrorNotice('Could not switch camera device.');
+      // Retain the existing working camera and display friendly notice
+      setMediaErrorNotice(`Could not switch to ${nextFacing === 'environment' ? 'rear' : 'front'} camera. Retaining active camera.`);
+      setTimeout(() => setMediaErrorNotice(null), 4000);
     }
   };
 
@@ -1440,34 +1591,51 @@ export default function MeetingRoom({
         </div>
       )}
 
-      {/* Unobtrusive acoustic feedback hint */}
-      {showAcousticHint && totalParticipantCount > 1 && (
-        <div className="bg-[#16181f] border-b border-[#242732] px-4 py-1.5 flex items-center justify-between text-[11px] text-slate-400 z-20 shrink-0">
-          <div className="flex items-center space-x-2">
-            <Volume2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <span>
-              Joining with multiple devices in the same room? Use headphones or mute one device to avoid acoustic feedback.
-            </span>
-          </div>
-          <button
-            onClick={() => setShowAcousticHint(false)}
-            className="p-0.5 hover:text-white rounded hover:bg-[#1e212b] transition"
-            title="Dismiss"
-          >
-            <CloseIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* Main Stage & Non-overlapping Floating Sidebar Layout */}
-      <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative w-full h-full p-2 sm:p-3 pb-24 gap-0 sm:gap-3 transition-all duration-300">
-        <main className="meeting-stage-area relative flex flex-col items-center justify-center overflow-y-auto w-full h-full">
+      <div className={`flex-1 flex flex-col sm:flex-row overflow-hidden relative w-full h-full p-2 sm:p-3 ${isAnyoneScreenSharing ? 'pb-20 sm:pb-22' : 'pb-24'} gap-0 sm:gap-3 transition-all duration-300`}>
+        <main className={`meeting-stage-area relative flex flex-col items-center justify-center w-full h-full min-h-0 ${isAnyoneScreenSharing ? 'overflow-hidden' : 'overflow-y-auto'}`}>
 
           {/* 1. SCREEN SHARING HERO VIEW WITH PICTURE-IN-PICTURE CONTROL */}
           {isAnyoneScreenSharing ? (
-            <div className="w-full h-full max-w-7xl flex flex-col space-y-3">
-              {/* Screen Share Stage */}
-              <div className="relative flex-1 min-h-[50vh] bg-black rounded-xl overflow-hidden border border-[#242732] flex items-center justify-center shadow-2xl">
+            <div className="w-full h-full max-w-7xl flex flex-col space-y-2 min-h-0 overflow-hidden">
+              {/* Participant Video Strip (Top) - Compact, fully visible without scrolling, above presentation */}
+              <div className="h-24 sm:h-28 md:h-32 flex items-center space-x-2.5 overflow-x-auto overflow-y-hidden no-scrollbar shrink-0 py-1 px-1">
+                <div className="h-full aspect-video shrink-0 rounded-lg overflow-hidden border border-[#242732] shadow-md relative">
+                  <VideoTile
+                    displayName={displayName}
+                    stream={localStream}
+                    isLocal={true}
+                    isFrontFacing={facingMode === 'user'}
+                    isHost={isHost}
+                    isAudioMuted={isAudioMuted}
+                    isVideoOff={isVideoOff}
+                    isSpeaking={isLocalSpeaking}
+                    isHandRaised={isLocalHandRaised}
+                    isPinned={pinnedPeerId === 'local'}
+                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
+                  />
+                </div>
+
+                {remotePeersList.map((peer) => (
+                  <div key={peer.peerId} className="h-full aspect-video shrink-0 rounded-lg overflow-hidden border border-[#242732] shadow-md relative">
+                    <VideoTile
+                      displayName={peer.displayName}
+                      stream={peer.stream}
+                      isLocal={false}
+                      isHost={peer.userId === meeting.hostUserId}
+                      isAudioMuted={peer.isAudioMuted}
+                      isVideoOff={peer.isVideoOff}
+                      isSpeaking={peer.isSpeaking}
+                      isHandRaised={!!remoteHands.get(peer.peerId)}
+                      isPinned={pinnedPeerId === peer.peerId}
+                      onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Primary Shared Screen Stage - Fills remaining height with zero vertical overflow */}
+              <div className="relative flex-1 min-h-0 w-full bg-black rounded-xl overflow-hidden border border-[#242732] flex items-center justify-center shadow-2xl">
                 {isScreenSharing ? (
                   <video
                     ref={localScreenVideoRef}
@@ -1521,42 +1689,6 @@ export default function MeetingRoom({
                     Stop Sharing
                   </button>
                 )}
-              </div>
-
-              {/* Participant Filmstrip */}
-              <div className="h-32 sm:h-36 flex items-center space-x-3 overflow-x-auto pb-1 shrink-0">
-                <div className="w-48 sm:w-56 h-full shrink-0">
-                  <VideoTile
-                    displayName={displayName}
-                    stream={localStream}
-                    isLocal={true}
-                    isFrontFacing={facingMode === 'user'}
-                    isHost={isHost}
-                    isAudioMuted={isAudioMuted}
-                    isVideoOff={isVideoOff}
-                    isSpeaking={isLocalSpeaking}
-                    isHandRaised={isLocalHandRaised}
-                    isPinned={pinnedPeerId === 'local'}
-                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
-                  />
-                </div>
-
-                {remotePeersList.map((peer) => (
-                  <div key={peer.peerId} className="w-48 sm:w-56 h-full shrink-0">
-                    <VideoTile
-                      displayName={peer.displayName}
-                      stream={peer.stream}
-                      isLocal={false}
-                      isHost={peer.userId === meeting.hostUserId}
-                      isAudioMuted={peer.isAudioMuted}
-                      isVideoOff={peer.isVideoOff}
-                      isSpeaking={peer.isSpeaking}
-                      isHandRaised={!!remoteHands.get(peer.peerId)}
-                      isPinned={pinnedPeerId === peer.peerId}
-                      onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
-                    />
-                  </div>
-                ))}
               </div>
             </div>
           ) : pinnedPeerId && spotlight ? (
@@ -1789,6 +1921,7 @@ export default function MeetingRoom({
         unreadCount={unreadCount}
         activePanel={activePanel}
         isHandRaised={isLocalHandRaised}
+        canFlipCamera={canSwitchCamera}
         onToggleAudio={handleToggleAudio}
         onToggleVideo={handleToggleVideo}
         onFlipCamera={handleFlipCamera}

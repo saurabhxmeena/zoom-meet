@@ -107,6 +107,8 @@ export async function createMeeting(data: {
   hostUserId: string;
   hostName: string;
   passcode?: string;
+  scheduledFor?: string | Date | null;
+  status?: 'active' | 'ended' | 'scheduled';
   settings?: Partial<IMeeting['settings']>;
 }): Promise<IMeeting> {
   // Generate a Zoom-style code e.g. "849-204-918"
@@ -128,6 +130,10 @@ export async function createMeeting(data: {
     ...data.settings,
   };
 
+  const scheduledDate = data.scheduledFor ? new Date(data.scheduledFor) : null;
+  const initialStatus: 'active' | 'ended' | 'scheduled' =
+    data.status || (scheduledDate && scheduledDate.getTime() > Date.now() ? 'scheduled' : 'active');
+
   if (dbReady) {
     const meet = await MeetingModel.create({
       meetingCode: code,
@@ -135,7 +141,8 @@ export async function createMeeting(data: {
       hostUserId: data.hostUserId,
       hostName: data.hostName,
       passcode: data.passcode || '',
-      status: 'active',
+      status: initialStatus,
+      scheduledFor: scheduledDate,
       settings: defaultSettings,
     });
     return {
@@ -145,7 +152,8 @@ export async function createMeeting(data: {
       hostUserId: meet.hostUserId,
       hostName: meet.hostName,
       passcode: meet.passcode,
-      status: meet.status,
+      status: meet.status as 'active' | 'ended' | 'scheduled',
+      scheduledFor: meet.scheduledFor ? new Date(meet.scheduledFor).toISOString() : null,
       settings: meet.settings,
       createdAt: meet.createdAt,
       endedAt: meet.endedAt,
@@ -159,7 +167,8 @@ export async function createMeeting(data: {
     hostUserId: data.hostUserId,
     hostName: data.hostName,
     passcode: data.passcode || '',
-    status: 'active',
+    status: initialStatus,
+    scheduledFor: scheduledDate ? scheduledDate.toISOString() : null,
     settings: defaultSettings,
     createdAt: new Date().toISOString(),
     endedAt: null,
@@ -189,7 +198,8 @@ export async function findMeetingByCode(code: string): Promise<IMeeting | null> 
         hostUserId: meet.hostUserId,
         hostName: meet.hostName,
         passcode: meet.passcode,
-        status: meet.status as 'active' | 'ended',
+        status: meet.status as 'active' | 'ended' | 'scheduled',
+        scheduledFor: meet.scheduledFor ? new Date(meet.scheduledFor).toISOString() : null,
         settings: meet.settings,
         createdAt: meet.createdAt,
         endedAt: meet.endedAt,
@@ -216,7 +226,8 @@ export async function listMeetingsByUser(userId: string): Promise<IMeeting[]> {
       hostUserId: m.hostUserId,
       hostName: m.hostName,
       passcode: m.passcode,
-      status: m.status as 'active' | 'ended',
+      status: m.status as 'active' | 'ended' | 'scheduled',
+      scheduledFor: m.scheduledFor ? new Date(m.scheduledFor).toISOString() : null,
       settings: m.settings,
       createdAt: m.createdAt,
       endedAt: m.endedAt,

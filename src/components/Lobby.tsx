@@ -252,11 +252,22 @@ export default function Lobby({
   // Switch between front (user) and rear (environment) cameras
   const toggleCameraFacing = async () => {
     const nextFacing = facingMode === 'user' ? 'environment' : 'user';
+    const currentStream = streamRef.current;
+    const oldVideoTracks = currentStream ? currentStream.getVideoTracks() : [];
+
     try {
       const freshTrack = await acquireCameraTrack(nextFacing);
-      if (!freshTrack) return;
+      if (!freshTrack) {
+        setPermissionError(`Could not switch to ${nextFacing === 'environment' ? 'rear' : 'front'} camera. Retaining active camera.`);
+        setTimeout(() => setPermissionError(null), 4000);
+        return;
+      }
 
-      const currentStream = streamRef.current;
+      // Stop old camera track
+      oldVideoTracks.forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+
       const nonVideoTracks = currentStream ? currentStream.getTracks().filter((t) => t.kind !== 'video') : [];
       const newStream = new MediaStream([...nonVideoTracks, freshTrack]);
       streamRef.current = newStream;
@@ -271,7 +282,8 @@ export default function Lobby({
       }
     } catch (err) {
       console.warn('[Lobby] Camera flip notice:', err);
-      setPermissionError('Could not switch camera device.');
+      setPermissionError(`Could not switch to ${nextFacing === 'environment' ? 'rear' : 'front'} camera. Retaining active camera.`);
+      setTimeout(() => setPermissionError(null), 4000);
     }
   };
 
@@ -402,13 +414,13 @@ export default function Lobby({
                 {isVideoOff ? <VideoOff className="w-4 h-4" /> : <VideoIcon className="w-4 h-4" />}
               </button>
 
-              {/* Flip camera toggle (front / back) */}
-              {!isVideoOff && (
+              {/* Flip camera toggle (front / rear) - only on supported smartphones */}
+              {!isVideoOff && hasMultiCams && (
                 <button
                   type="button"
                   onClick={toggleCameraFacing}
                   className="p-2.5 rounded-lg bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37] border border-[#2a2d38] transition active:scale-95"
-                  title="Flip camera (front / back)"
+                  title="Switch camera (front / rear)"
                 >
                   <SwitchCamera className="w-4 h-4 text-[#8e929b] hover:text-[#f1f2f4]" />
                 </button>

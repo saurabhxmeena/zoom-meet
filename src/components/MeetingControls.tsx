@@ -25,6 +25,7 @@ interface MeetingControlsProps {
   unreadCount: number;
   activePanel: 'none' | 'chat' | 'participants' | 'info';
   isHandRaised?: boolean;
+  canFlipCamera?: boolean;
   onToggleAudio: () => void;
   onToggleVideo: () => void;
   onFlipCamera?: () => void;
@@ -56,6 +57,7 @@ export default function MeetingControls({
   unreadCount,
   activePanel,
   isHandRaised = false,
+  canFlipCamera = false,
   onToggleAudio,
   onToggleVideo,
   onFlipCamera,
@@ -126,13 +128,13 @@ export default function MeetingControls({
             {isVideoOff ? <VideoOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <VideoIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
           </button>
 
-          {/* Flip Camera (Front / Back) - Especially handy for smartphones */}
-          {onFlipCamera && !isVideoOff && (
+          {/* Flip Camera (Front / Rear) - Only shown on supported smartphones with multiple cameras */}
+          {canFlipCamera && onFlipCamera && !isVideoOff && (
             <button
               type="button"
               onClick={onFlipCamera}
               className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition active:scale-95 shrink-0 bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37] border border-[#2a2d38]"
-              title="Flip camera (front / back)"
+              title="Switch camera (front / rear)"
             >
               <SwitchCamera className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#8e929b] hover:text-[#f1f2f4]" />
             </button>

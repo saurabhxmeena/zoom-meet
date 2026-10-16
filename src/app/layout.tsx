@@ -11,7 +11,12 @@ export const metadata: Metadata = {
   title: 'Zoom Meet',
   description: 'Fast, clear, peer-to-peer video meetings directly in your browser.',
   icons: {
-    icon: '/favicon.ico',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: 'any' },
+    ],
+    shortcut: '/icon.svg',
+    apple: '/apple-icon.png',
   },
 };
 

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="zoomGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2D8CFF"/>
+      <stop offset="100%" stop-color="#0B5CFF"/>
+    </linearGradient>
+  </defs>
+  <!-- Zoom-inspired rounded blue squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#zoomGradient)" />
+  <!-- Crisp white meeting video camera -->
+  <rect x="14" y="21" width="23" height="22" rx="4" fill="#FFFFFF"/>
+  <path d="M40 27 L50 20.5 C51 19.8 52 20.3 52 21.5 L52 42.5 C52 43.7 51 44.2 50 43.5 L40 37 Z" fill="#FFFFFF"/>
+</svg>

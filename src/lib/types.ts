@@ -21,7 +21,8 @@ export interface IMeeting {
   hostUserId: string;
   hostName: string;
   passcode?: string;
-  status: 'active' | 'ended';
+  status: 'active' | 'ended' | 'scheduled';
+  scheduledFor?: string | Date | null;
   settings: IMeetingSettings;
   createdAt: string | Date;
   endedAt?: string | Date | null;

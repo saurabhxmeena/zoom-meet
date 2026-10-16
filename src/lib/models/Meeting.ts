@@ -6,7 +6,8 @@ export interface IMeetingDocument extends Document {
   hostUserId: string;
   hostName: string;
   passcode?: string;
-  status: 'active' | 'ended';
+  status: 'active' | 'ended' | 'scheduled';
+  scheduledFor?: Date | null;
   settings: {
     allowScreenShare: boolean;
     muteOnEntry: boolean;
@@ -24,7 +25,8 @@ const MeetingSchema = new Schema<IMeetingDocument>(
     hostUserId: { type: String, required: true, index: true },
     hostName: { type: String, required: true },
     passcode: { type: String, default: '' },
-    status: { type: String, enum: ['active', 'ended'], default: 'active' },
+    status: { type: String, enum: ['active', 'ended', 'scheduled'], default: 'active' },
+    scheduledFor: { type: Date, default: null, index: true },
     settings: {
       allowScreenShare: { type: Boolean, default: true },
       muteOnEntry: { type: Boolean, default: false },

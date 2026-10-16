@@ -209,6 +209,7 @@ export default function HomePage() {
             <div className="divide-y divide-[#222530] surface-card overflow-hidden">
               {meetings.slice(0, 5).map((meet) => {
                 const isEnded = meet.status === 'ended';
+                const isScheduled = meet.status === 'scheduled' || !!meet.scheduledFor;
                 return (
                   <div
                     key={meet._id}
@@ -216,12 +217,21 @@ export default function HomePage() {
                   >
                     <div className="min-w-0 pr-4">
                       <div className="flex items-center space-x-2">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${isEnded ? 'bg-[#5c606a]' : 'bg-[#16a34a]'}`} />
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${
+                            isEnded ? 'bg-[#5c606a]' : isScheduled ? 'bg-[#3b82f6]' : 'bg-[#16a34a]'
+                          }`}
+                        />
                         <span className="text-xs font-medium text-[#f1f2f4] truncate">
                           {meet.title}
                         </span>
+                        {isScheduled && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#3b82f6]/15 text-[#60a5fa] border border-[#3b82f6]/30 shrink-0">
+                            Scheduled
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center space-x-2 mt-0.5 pl-4">
+                      <div className="flex items-center space-x-2 mt-0.5 pl-4 flex-wrap gap-y-1">
                         <span className="text-[11px] font-mono text-[#8e929b]">
                           {meet.meetingCode}
                         </span>
@@ -229,6 +239,30 @@ export default function HomePage() {
                         <span className="text-[11px] text-[#5c606a] truncate">
                           {meet.hostName}
                         </span>
+                        {meet.scheduledFor && (
+                          <>
+                            <span className="text-[10px] text-[#5c606a]">•</span>
+                            <span className="text-[11px] text-[#93c5fd] flex items-center space-x-1">
+                              <Calendar className="w-3 h-3 inline mr-1 text-[#3b82f6]" />
+                              {(() => {
+                                try {
+                                  const d = new Date(meet.scheduledFor);
+                                  return isNaN(d.getTime())
+                                    ? ''
+                                    : d.toLocaleString(undefined, {
+                                        weekday: 'short',
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: 'numeric',
+                                        minute: '2-digit',
+                                      });
+                                } catch {
+                                  return '';
+                                }
+                              })()}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 

@@ -17,9 +17,23 @@ export default function ScheduleModal({
   defaultHostName = 'Host',
   defaultHostUserId = 'user_1',
 }: ScheduleModalProps) {
+  // Compute local today's date and default time (next hour)
+  const getInitialDateTime = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const localToday = `${year}-${month}-${day}`;
+
+    const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
+    const localTime = `${String(nextHour.getHours()).padStart(2, '0')}:00`;
+    return { localToday, localTime };
+  };
+
+  const { localToday, localTime } = getInitialDateTime();
   const [title, setTitle] = useState('Discussion Session');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState('14:00');
+  const [date, setDate] = useState(localToday);
+  const [time, setTime] = useState(localTime);
   const [passcode, setPasscode] = useState('');
   const [requirePasscode, setRequirePasscode] = useState(false);
   const [allowScreenShare, setAllowScreenShare] = useState(true);
@@ -29,18 +43,52 @@ export default function ScheduleModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     setError('');
+
+    if (!title.trim()) {
+      setError('Please provide a meeting topic.');
+      return;
+    }
+
+    if (!date || !time) {
+      setError('Please select both a date and a time.');
+      return;
+    }
+
+    // Parse local date & time accurately without unexpected UTC day shifting
+    const [yearStr, monthStr, dayStr] = date.split('-');
+    const [hourStr, minStr] = time.split(':');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10) - 1;
+    const day = parseInt(dayStr, 10);
+    const hours = parseInt(hourStr, 10);
+    const minutes = parseInt(minStr, 10);
+
+    const scheduledDate = new Date(year, month, day, hours, minutes, 0, 0);
+
+    if (isNaN(scheduledDate.getTime())) {
+      setError('Please select a valid date and time.');
+      return;
+    }
+
+    // Prevent scheduling meetings in the past (allow 1-minute margin for form completion)
+    if (scheduledDate.getTime() < Date.now() - 60000) {
+      setError('Please select a future date and time for the meeting.');
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
       const res = await fetch('/api/meetings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title,
+          title: title.trim(),
           hostUserId: defaultHostUserId,
           hostName: defaultHostName,
-          passcode: requirePasscode ? passcode : '',
+          passcode: requirePasscode ? passcode.trim() : '',
+          scheduledFor: scheduledDate.toISOString(),
           settings: {
             allowScreenShare,
             muteOnEntry,
@@ -113,9 +161,11 @@ export default function ScheduleModal({
               <input
                 type="date"
                 required
+                min={localToday}
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full h-10 px-3 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg text-[#f8fafc] transition"
+                style={{ colorScheme: 'dark' }}
+                className="w-full h-10 px-3 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg text-[#f8fafc] [color-scheme:dark] transition"
               />
             </div>
             <div>
@@ -125,7 +175,8 @@ export default function ScheduleModal({
                 required
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
-                className="w-full h-10 px-3 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg text-[#f8fafc] transition"
+                style={{ colorScheme: 'dark' }}
+                className="w-full h-10 px-3 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg text-[#f8fafc] [color-scheme:dark] transition"
               />
             </div>
           </div>

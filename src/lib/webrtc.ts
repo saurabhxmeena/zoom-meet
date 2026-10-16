@@ -118,6 +118,38 @@ export async function acquireCameraTrack(
 }
 
 /**
+ * Checks if the current client is a smartphone device with at least two cameras (front & rear).
+ * Strictly excludes desktop, laptops, and single-camera devices.
+ */
+export async function checkCanSwitchCamera(): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+
+  // 1. Detect smartphone environment (strictly exclude desktop and laptop browsers)
+  const ua = navigator.userAgent || '';
+  const isSmartphone =
+    /Android.*Mobile|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile Safari/i.test(ua) ||
+    Boolean((navigator as any).userAgentData?.mobile);
+
+  if (!isSmartphone) {
+    return false;
+  }
+
+  // 2. Query available camera devices (must have at least 2 distinct video inputs)
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return false;
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+    return videoInputs.length >= 2;
+  } catch (err) {
+    console.warn('[webrtc] Error querying camera devices:', err);
+    return false;
+  }
+}
+
+/**
  * Audio track acquisition with fallback
  */
 export async function acquireAudioTrack(): Promise<MediaStreamTrack | null> {
@@ -130,7 +162,18 @@ export async function acquireAudioTrack(): Promise<MediaStreamTrack | null> {
       },
     });
     const track = stream.getAudioTracks()[0];
-    if (track) return track;
+    if (track) {
+      try {
+        const settings = track.getSettings();
+        console.log('[webrtc] Enhanced audio track active:', {
+          echoCancellation: settings.echoCancellation,
+          noiseSuppression: settings.noiseSuppression,
+          autoGainControl: settings.autoGainControl,
+          deviceId: settings.deviceId ? 'present' : 'default',
+        });
+      } catch {}
+      return track;
+    }
   } catch (err1) {
     console.warn('[webrtc] Enhanced audio acquisition notice:', err1);
   }
@@ -145,17 +188,8 @@ export async function acquireAudioTrack(): Promise<MediaStreamTrack | null> {
 }
 
 /**
- * Check if the device has multiple video cameras (e.g. front & back on smartphones)
+ * Check if the device is a smartphone with multiple video cameras (e.g. front & back)
  */
 export async function hasMultipleCameras(): Promise<boolean> {
-  try {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
-      return false;
-    }
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-    return videoInputs.length > 1;
-  } catch {
-    return false;
-  }
+  return checkCanSwitchCamera();
 }

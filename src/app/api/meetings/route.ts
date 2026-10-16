@@ -11,11 +11,24 @@ export async function POST(req: NextRequest) {
     const hostUserId = payload ? payload.userId : body.hostUserId || 'guest_' + Math.random().toString(36).substring(2, 8);
     const hostName = payload ? payload.displayName : body.hostName || 'Meeting Host';
 
+    let scheduledDate: Date | null = null;
+    if (body.scheduledFor) {
+      scheduledDate = new Date(body.scheduledFor);
+      if (isNaN(scheduledDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid scheduled date and time format' }, { status: 400 });
+      }
+      // Allow 2-minute leeway for clock differences/form submission delay
+      if (scheduledDate.getTime() < Date.now() - 120000) {
+        return NextResponse.json({ error: 'Scheduled meeting time must be in the future' }, { status: 400 });
+      }
+    }
+
     const meeting = await createMeeting({
       title: body.title || 'Zoom Cloud Meeting',
       hostUserId,
       hostName,
       passcode: body.passcode || '',
+      scheduledFor: scheduledDate ? scheduledDate.toISOString() : null,
       settings: body.settings || {},
     });
 
