@@ -76,6 +76,33 @@ body {
   box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7);
 }
 
+.surface-floating-panel {
+  background-color: #16181f;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.65), 0 2px 8px -1px rgba(0, 0, 0, 0.4);
+}
+
+/* Coordinated animated layout for non-overlapping sidebar */
+.meeting-stage-area {
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100%;
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              flex-grow 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              max-width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: width, flex-grow;
+}
+
+.meeting-sidebar-slot {
+  height: 100%;
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              opacity 0.25s ease,
+              margin 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: width, opacity;
+}
+
 /* Natural speaking indicator - crisp, no neon bloom */
 .tile-speaking {
   border-color: #3b82f6 !important;
@@ -95,3 +122,68 @@ button, input, select, textarea, a {
     scroll-behavior: auto !important;
   }
 }
+
+/* Smartphone & Touch Optimizations */
+html, body {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
+}
+
+.pt-safe {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0.5rem));
+}
+
+/* Prevent iOS auto-zoom on input focus by guaranteeing 16px font-size */
+@media screen and (max-width: 640px) {
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Smooth floating reaction animation for meeting room */
+@keyframes floatUpReaction {
+  0% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--x-offset, 0px)), 20px) scale(0.75);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--x-offset, 0px)), 0px) scale(1.05);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--x-offset, 0px)), -25px) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--x-offset, 0px)), -120px) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--x-offset, 0px)), -165px) scale(0.9);
+  }
+}
+
+.animate-floating-reaction {
+  animation: floatUpReaction 2.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  will-change: transform, opacity;
+}
+

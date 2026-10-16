@@ -31,6 +31,7 @@ interface ParticipantsPanelProps {
   onKickParticipant?: (peerId: string) => void;
   onMuteAll?: () => void;
   onClose: () => void;
+  hideHeader?: boolean;
 }
 
 export default function ParticipantsPanel({
@@ -47,6 +48,7 @@ export default function ParticipantsPanel({
   onKickParticipant,
   onMuteAll,
   onClose,
+  hideHeader = false,
 }: ParticipantsPanelProps) {
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState('');
@@ -63,27 +65,33 @@ export default function ParticipantsPanel({
     p.displayName.toLowerCase().includes(search.toLowerCase().trim())
   );
 
+  const containerClasses = hideHeader
+    ? 'flex-1 min-h-0 flex flex-col h-full overflow-hidden select-none'
+    : 'w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-2xl select-none animate-in slide-in-from-right-4 duration-200';
+
   return (
-    <aside className="w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-2xl select-none animate-in slide-in-from-right-4 duration-200">
+    <div className={containerClasses}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
-        <div className="flex items-center space-x-2">
-          <Users className="w-4 h-4 text-slate-300" />
-          <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">
-            Participants
-          </h3>
-          <span className="text-[10px] font-semibold text-slate-300 bg-[#1e212b] px-2 py-0.5 rounded border border-[#242732]">
-            {totalCount}
-          </span>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
+          <div className="flex items-center space-x-2">
+            <Users className="w-4 h-4 text-slate-300" />
+            <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">
+              Participants
+            </h3>
+            <span className="text-[10px] font-semibold text-slate-300 bg-[#1e212b] px-2 py-0.5 rounded border border-[#242732]">
+              {totalCount}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
+            title="Close sidebar"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
-          title="Close sidebar"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+      )}
 
       {/* Invite bar */}
       <div className="p-3 border-b border-[#242732] bg-[#12141a] flex items-center justify-between">
@@ -298,6 +306,6 @@ export default function ParticipantsPanel({
           </button>
         </div>
       )}
-    </aside>
+    </div>
   );
 }

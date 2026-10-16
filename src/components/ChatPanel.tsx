@@ -10,14 +10,22 @@ interface ChatPanelProps {
   currentUserId: string;
   currentDisplayName: string;
   onSendMessage: (text: string) => void;
+  onReactToMessage?: (messageId: string, emoji: string) => void;
   onClose: () => void;
+  hideHeader?: boolean;
 }
+
+const QUICK_CHAT_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '🚀', '✨'];
+const MESSAGE_REACTION_OPTIONS = ['❤️', '👍', '😂', '🎉', '🔥'];
 
 export default function ChatPanel({
   messages,
   currentUserId,
+  currentDisplayName,
   onSendMessage,
+  onReactToMessage,
   onClose,
+  hideHeader = false,
 }: ChatPanelProps) {
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -64,24 +72,30 @@ export default function ChatPanel({
     }
   };
 
+  const containerClasses = hideHeader
+    ? 'flex-1 min-h-0 flex flex-col h-full overflow-hidden'
+    : 'w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-xl';
+
   return (
-    <aside className="w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-xl">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
-        <div className="flex items-center space-x-2">
-          <MessageSquare className="w-4 h-4 text-slate-300" />
-          <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">Meeting Chat</h3>
-          <span className="text-[10px] font-medium text-slate-400 bg-[#1e212b] px-2 py-0.5 rounded border border-[#242732]">
-            {messages.length}
-          </span>
+    <div className={containerClasses}>
+      {/* Header (only shown if not embedded in unified floating sidebar) */}
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
+          <div className="flex items-center space-x-2">
+            <MessageSquare className="w-4 h-4 text-slate-300" />
+            <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">Meeting Chat</h3>
+            <span className="text-[10px] font-medium text-slate-400 bg-[#1e212b] px-2 py-0.5 rounded border border-[#242732]">
+              {messages.length}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+      )}
 
       {/* Message List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
@@ -108,7 +122,7 @@ export default function ChatPanel({
             return (
               <div
                 key={msg._id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                className={`group flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
                 {!isMe && (
                   <span className="text-[11px] font-medium text-slate-400 mb-1 px-1">
@@ -117,18 +131,63 @@ export default function ChatPanel({
                 )}
 
                 <div
-                  className={`px-3 py-2 rounded-lg max-w-[85%] break-words leading-relaxed text-xs ${
+                  className={`px-3 py-2 rounded-lg max-w-[85%] break-words leading-relaxed text-xs relative ${
                     isMe
                       ? 'bg-[#2563eb] text-white rounded-tr-none'
                       : 'bg-[#1e212b] text-slate-200 border border-[#242732] rounded-tl-none'
                   }`}
                 >
                   {msg.text}
+
+                  {/* Active Reactions Pill */}
+                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5 pt-1 border-t border-white/10">
+                      {Object.entries(msg.reactions).map(([emoji, users]) => {
+                        const hasReacted = users.includes(currentDisplayName);
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => onReactToMessage && onReactToMessage(msg._id, emoji)}
+                            className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[11px] border transition ${
+                              hasReacted
+                                ? 'bg-white/20 border-white/40 text-white font-medium'
+                                : 'bg-[#101217]/80 border-[#242732] text-slate-300 hover:bg-[#101217]'
+                            }`}
+                            title={`${users.join(', ')} reacted with ${emoji}`}
+                          >
+                            <span>{emoji}</span>
+                            <span className="text-[10px]">{users.length}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center space-x-1 text-[10px] text-slate-500 mt-1 px-1">
-                  <Clock className="w-2.5 h-2.5" />
-                  <span>{time}</span>
+                {/* Footer: timestamp & quick reaction buttons */}
+                <div className="flex items-center space-x-2 mt-1 px-1">
+                  <div className="flex items-center space-x-1 text-[10px] text-slate-500">
+                    <Clock className="w-2.5 h-2.5" />
+                    <span>{time}</span>
+                  </div>
+
+                  {/* Message hover reaction bar */}
+                  {onReactToMessage && (
+                    <div className="opacity-0 group-hover:opacity-100 sm:opacity-0 max-sm:opacity-75 transition-opacity flex items-center space-x-1">
+                      {MESSAGE_REACTION_OPTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => onReactToMessage(msg._id, emoji)}
+                          className="hover:scale-125 transition active:scale-95 text-xs p-0.5"
+                          title={`React with ${emoji}`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -137,8 +196,8 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input bar with Emoji Picker */}
-      <div className="relative p-3 border-t border-[#242732] bg-[#16181f]">
+      {/* Input bar with Quick Emojis & Emoji Picker */}
+      <div className="relative p-2.5 sm:p-3 border-t border-[#242732] bg-[#16181f]">
         {showEmojiPicker && (
           <EmojiPicker
             onSelectEmoji={handleSelectEmoji}
@@ -146,6 +205,21 @@ export default function ChatPanel({
             position="top"
           />
         )}
+
+        {/* Quick Emoji Toolbar */}
+        <div className="flex items-center space-x-1 mb-2 pb-1 overflow-x-auto no-scrollbar">
+          {QUICK_CHAT_EMOJIS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => handleSelectEmoji(emoji)}
+              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#1e212b] text-sm hover:scale-115 active:scale-95 transition shrink-0"
+              title={`Insert ${emoji}`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
 
         <form onSubmit={handleSubmit} className="flex items-center space-x-2">
           {/* Emoji button */}
@@ -157,7 +231,7 @@ export default function ChatPanel({
                 ? 'bg-[#2563eb] text-white'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e212b]'
             }`}
-            title="Add emoji"
+            title="More emojis"
           >
             <Smile className="w-4 h-4" />
           </button>
@@ -170,7 +244,7 @@ export default function ChatPanel({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message everyone (Enter to send)..."
+            placeholder="Message everyone..."
             className="flex-1 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f8fafc] placeholder-slate-500 transition"
           />
 
@@ -185,6 +259,7 @@ export default function ChatPanel({
           </button>
         </form>
       </div>
-    </aside>
+    </div>
   );
 }
+

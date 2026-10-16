@@ -7,9 +7,10 @@ import { IMeeting } from '@/lib/types';
 interface InfoPanelProps {
   meeting: IMeeting;
   onClose: () => void;
+  hideHeader?: boolean;
 }
 
-export default function InfoPanel({ meeting, onClose }: InfoPanelProps) {
+export default function InfoPanel({ meeting, onClose, hideHeader = false }: InfoPanelProps) {
   const [copied, setCopied] = useState(false);
 
   const inviteUrl = typeof window !== 'undefined' ? `${window.location.origin}/meet/${meeting.meetingCode}` : '';
@@ -20,22 +21,27 @@ export default function InfoPanel({ meeting, onClose }: InfoPanelProps) {
     setTimeout(() => setCopied(false), 1800);
   };
 
+  const containerClasses = hideHeader
+    ? 'flex-1 min-h-0 flex flex-col h-full overflow-hidden'
+    : 'w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-xl';
+
   return (
-    <aside className="w-80 sm:w-88 h-full bg-[#16181f] border-l border-[#242732] flex flex-col z-30 shadow-xl">
-      
+    <div className={containerClasses}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
-        <div className="flex items-center space-x-2">
-          <Info className="w-4 h-4 text-slate-300" />
-          <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">Meeting Details</h3>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#242732] bg-[#16181f]">
+          <div className="flex items-center space-x-2">
+            <Info className="w-4 h-4 text-slate-300" />
+            <h3 className="text-xs font-semibold text-[#f8fafc] tracking-tight">Meeting Details</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-md transition"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
@@ -91,6 +97,6 @@ export default function InfoPanel({ meeting, onClose }: InfoPanelProps) {
 
       </div>
 
-    </aside>
+    </div>
   );
 }

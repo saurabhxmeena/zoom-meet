@@ -33,6 +33,7 @@ export interface IMessage {
   senderUserId: string;
   senderName: string;
   text: string;
+  reactions?: Record<string, string[]>; // emoji -> array of sender displayNames
   createdAt: string | Date;
 }
 

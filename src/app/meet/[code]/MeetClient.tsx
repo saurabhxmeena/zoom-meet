@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { IMeeting, IUser } from '@/lib/types';
 import Lobby from '@/components/Lobby';
@@ -21,12 +21,19 @@ export default function MeetClient({ code }: MeetClientProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [joined, setJoined] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [joinedDisplayName, setJoinedDisplayName] = useState('');
   const [joinedUserId, setJoinedUserId] = useState('');
   const [isHost, setIsHost] = useState(false);
+
+  const streamRef = useRef<MediaStream | null>(null);
+  useEffect(() => {
+    streamRef.current = activeStream;
+  }, [activeStream]);
 
   useEffect(() => {
     async function loadData() {
@@ -74,9 +81,10 @@ export default function MeetClient({ code }: MeetClientProps) {
     isVideoOff: boolean;
     passcode?: string;
     stream: MediaStream | null;
+    facingMode?: 'user' | 'environment';
   }) => {
     try {
-      setLoading(true);
+      setIsJoining(true);
       setError(null);
 
       const userId = currentUser?._id || 'guest_' + Math.random().toString(36).substring(2, 9);
@@ -101,20 +109,21 @@ export default function MeetClient({ code }: MeetClientProps) {
       setIsHost(data.isHost || (currentUser?._id === meeting?.hostUserId));
       setIsAudioMuted(options.isAudioMuted);
       setIsVideoOff(options.isVideoOff);
+      if (options.facingMode) setFacingMode(options.facingMode);
       setActiveStream(options.stream);
       setJoined(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      setIsJoining(false);
     }
   };
 
-  // Clean up any remaining active media tracks when MeetClient unmounts
+  // Clean up any remaining active media tracks when MeetClient completely unmounts
   useEffect(() => {
     return () => {
-      if (activeStream) {
-        activeStream.getTracks().forEach((track) => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
           try {
             track.stop();
           } catch {
@@ -123,26 +132,27 @@ export default function MeetClient({ code }: MeetClientProps) {
         });
       }
     };
-  }, [activeStream]);
+  }, []);
 
   const handleRoomLeave = () => {
-    if (activeStream) {
-      activeStream.getTracks().forEach((track) => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
         try {
           track.stop();
         } catch {
           // ignore
         }
       });
-      setActiveStream(null);
+      streamRef.current = null;
     }
+    setActiveStream(null);
     setJoined(false);
     router.push('/');
   };
 
   if (loading && !joined) {
     return (
-      <div className="min-h-screen bg-[#0e1015] flex flex-col items-center justify-center space-y-4 text-[#f8fafc]">
+      <div className="min-h-[100dvh] bg-[#0e1015] flex flex-col items-center justify-center space-y-4 text-[#f8fafc]">
         <div className="relative flex items-center justify-center">
           <div className="w-10 h-10 rounded-lg bg-[#16181f] border border-[#242732] flex items-center justify-center text-slate-400">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -191,6 +201,7 @@ export default function MeetClient({ code }: MeetClientProps) {
         initialStream={activeStream}
         initialAudioMuted={isAudioMuted}
         initialVideoOff={isVideoOff}
+        initialFacingMode={facingMode}
         onLeave={handleRoomLeave}
       />
     );
@@ -200,6 +211,7 @@ export default function MeetClient({ code }: MeetClientProps) {
     <Lobby
       meeting={meeting}
       initialDisplayName={currentUser?.displayName || ''}
+      isJoining={isJoining}
       onJoin={handleLobbyJoin}
     />
   );

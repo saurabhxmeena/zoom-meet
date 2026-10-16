@@ -146,9 +146,7 @@ export default function EmojiPicker({
   return (
     <div
       ref={containerRef}
-      className={`absolute ${
-        position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
-      } right-0 w-72 sm:w-80 bg-[#16181f] border border-[#2a2d38] rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col text-xs animate-in fade-in zoom-in-95 duration-150 select-none`}
+      className="absolute bottom-full mb-2 left-2 right-2 sm:left-auto sm:right-0 sm:w-80 max-h-[320px] bg-[#16181f] border border-[#2a2d38] rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col text-xs animate-in fade-in zoom-in-95 duration-150 select-none"
     >
       {/* Top Search & Close */}
       <div className="p-2.5 border-b border-[#242732] flex items-center space-x-2 bg-[#12141a]">
@@ -174,12 +172,12 @@ export default function EmojiPicker({
 
       {/* Category Tabs (shown when not searching) */}
       {!search.trim() && (
-        <div className="flex items-center px-2 py-1 border-b border-[#242732] bg-[#16181f] space-x-1 overflow-x-auto text-xs">
+        <div className="flex items-center px-2 py-1 border-b border-[#242732] bg-[#16181f] space-x-1 overflow-x-auto text-xs no-scrollbar">
           {EMOJI_CATEGORIES.map((cat) => (
             <button
               key={cat.id}
               onClick={() => setActiveTab(cat.id)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center space-x-1 shrink-0 ${
                 activeTab === cat.id
                   ? 'bg-[#2563eb] text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e212b]'
@@ -193,7 +191,7 @@ export default function EmojiPicker({
       )}
 
       {/* Emoji Grid */}
-      <div className="p-3 max-h-52 overflow-y-auto">
+      <div className="p-2.5 max-h-40 sm:max-h-52 overflow-y-auto">
         {filteredEmojis ? (
           filteredEmojis.length === 0 ? (
             <div className="py-8 text-center text-slate-500 text-xs">

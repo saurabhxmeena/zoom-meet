@@ -113,7 +113,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0e1015] text-[#f1f2f4] flex flex-col selection:bg-[#2563eb] selection:text-white">
+    <div className="min-h-[100dvh] bg-[#0e1015] text-[#f1f2f4] flex flex-col selection:bg-[#2563eb] selection:text-white">
       <Navbar currentUser={currentUser} onLogout={handleLogout} />
 
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 sm:px-6 py-14 sm:py-20 flex flex-col justify-center">

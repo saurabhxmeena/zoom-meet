@@ -3,8 +3,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Grid,
-  Maximize2,
   MonitorUp,
   Copy,
   Check,
@@ -13,14 +11,13 @@ import {
   Volume2,
   X as CloseIcon,
   ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
 import { IMeeting, IMessage, IPeerConnection } from '@/lib/types';
-import { createAudioAnalyser, ICE_SERVERS } from '@/lib/webrtc';
+import { createAudioAnalyser, ICE_SERVERS, acquireCameraTrack, acquireAudioTrack } from '@/lib/webrtc';
 import VideoTile from './VideoTile';
 import MeetingControls from './MeetingControls';
-import ChatPanel from './ChatPanel';
-import ParticipantsPanel from './ParticipantsPanel';
-import InfoPanel from './InfoPanel';
+import FloatingSidebar from './FloatingSidebar';
 
 interface MeetingRoomProps {
   meeting: IMeeting;
@@ -30,6 +27,7 @@ interface MeetingRoomProps {
   initialStream: MediaStream | null;
   initialAudioMuted: boolean;
   initialVideoOff: boolean;
+  initialFacingMode?: 'user' | 'environment';
   onLeave?: () => void;
 }
 
@@ -37,6 +35,7 @@ interface FloatingReaction {
   id: string;
   emoji: string;
   senderName: string;
+  xOffset: number;
 }
 
 export default function MeetingRoom({
@@ -47,6 +46,7 @@ export default function MeetingRoom({
   initialStream,
   initialAudioMuted,
   initialVideoOff,
+  initialFacingMode = 'user',
   onLeave,
 }: MeetingRoomProps) {
   const router = useRouter();
@@ -55,10 +55,18 @@ export default function MeetingRoom({
   const [localStream, setLocalStream] = useState<MediaStream | null>(initialStream);
   const [isAudioMuted, setIsAudioMuted] = useState(initialAudioMuted);
   const [isVideoOff, setIsVideoOff] = useState(initialVideoOff);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>(initialFacingMode);
   const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
+  const [mediaErrorNotice, setMediaErrorNotice] = useState<string | null>(null);
 
   // Master tracking of all created tracks to guarantee 100% camera/mic release on exit
   const allMediaTracksRef = useRef<Set<MediaStreamTrack>>(new Set());
+  const localStreamRef = useRef<MediaStream | null>(localStream);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    localStreamRef.current = localStream;
+  }, [localStream]);
 
   // Screen sharing & Picture-in-Picture state
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -68,17 +76,24 @@ export default function MeetingRoom({
   const localScreenVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteScreenVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  useEffect(() => {
+    screenStreamRef.current = screenStream;
+  }, [screenStream]);
+
   // Peer management
   const [peers, setPeers] = useState<Map<string, IPeerConnection>>(new Map());
   const peerInstanceRef = useRef<any>(null);
   const activeCallsRef = useRef<Map<string, any>>(new Map());
 
-  // Meeting view state (gallery vs speaker)
-  const [viewMode, setViewMode] = useState<'gallery' | 'speaker'>('gallery');
+  // Meeting view & pin state
   const [pinnedPeerId, setPinnedPeerId] = useState<string | null>(null);
 
-  // Side panels - PARTICIPANTS PANEL OPEN BY DEFAULT as requested
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('participants');
+  // Floating Sidebar - NONE by default on entering meeting
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('none');
+  const activePanelRef = useRef<'none' | 'chat' | 'participants' | 'info'>('none');
+  useEffect(() => {
+    activePanelRef.current = activePanel;
+  }, [activePanel]);
 
   // Meeting reactions & Hand raise state
   const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
@@ -111,7 +126,7 @@ export default function MeetingRoom({
     }
   }, [localStream]);
 
-  // Master function to stop and release all media hardware tracks
+  // Master function to stop and release all media hardware tracks on leaving
   const stopAllMediaTracks = useCallback(() => {
     allMediaTracksRef.current.forEach((track) => {
       try {
@@ -122,18 +137,13 @@ export default function MeetingRoom({
     });
     allMediaTracksRef.current.clear();
 
-    if (localStream) {
-      localStream.getTracks().forEach((t) => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => {
         try { t.stop(); } catch {}
       });
     }
-    if (initialStream) {
-      initialStream.getTracks().forEach((t) => {
-        try { t.stop(); } catch {}
-      });
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach((t) => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => {
         try { t.stop(); } catch {}
       });
     }
@@ -154,7 +164,7 @@ export default function MeetingRoom({
       remoteScreenVideoRef.current.pause();
       remoteScreenVideoRef.current.srcObject = null;
     }
-  }, [localStream, initialStream, screenStream]);
+  }, []);
 
   // Guarantee cleanup on window unload or page hide (e.g. tab close, navigation)
   useEffect(() => {
@@ -192,55 +202,85 @@ export default function MeetingRoom({
     return () => clearInterval(interval);
   }, []);
 
-  // Ensure working local media with full echo cancellation constraints
+  // Ensure working local media with echo cancellation and noise suppression
   useEffect(() => {
     let cancelled = false;
 
     async function ensureMedia() {
+      const current = localStreamRef.current;
       const hasLiveVideo =
-        localStream &&
-        localStream.getVideoTracks().length > 0 &&
-        localStream.getVideoTracks().some((t) => t.readyState === 'live');
+        current &&
+        current.getVideoTracks().length > 0 &&
+        current.getVideoTracks().some((t) => t.readyState === 'live');
 
       const hasLiveAudio =
-        localStream &&
-        localStream.getAudioTracks().length > 0 &&
-        localStream.getAudioTracks().some((t) => t.readyState === 'live');
+        current &&
+        current.getAudioTracks().length > 0 &&
+        current.getAudioTracks().some((t) => t.readyState === 'live');
 
+      // Only attempt acquisition if tracks are truly missing
       if (!hasLiveVideo || !hasLiveAudio) {
         try {
-          const fresh = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          });
+          let freshVideo: MediaStreamTrack | null = null;
+          let freshAudio: MediaStreamTrack | null = null;
 
-          fresh.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
+          if (!hasLiveVideo) {
+            freshVideo = await acquireCameraTrack(facingMode);
+            if (freshVideo) allMediaTracksRef.current.add(freshVideo);
+          }
+
+          if (!hasLiveAudio) {
+            freshAudio = await acquireAudioTrack();
+            if (freshAudio) allMediaTracksRef.current.add(freshAudio);
+          }
 
           if (!cancelled) {
-            fresh.getAudioTracks().forEach((t) => {
-              t.enabled = !isAudioMuted;
+            if (freshAudio) freshAudio.enabled = !isAudioMuted;
+            if (freshVideo) freshVideo.enabled = !isVideoOff;
+
+            const baseTracks = current ? current.getTracks() : [];
+            const remainingTracks = baseTracks.filter((t) => {
+              if (freshVideo && t.kind === 'video') return false;
+              if (freshAudio && t.kind === 'audio') return false;
+              return t.readyState === 'live';
             });
-            fresh.getVideoTracks().forEach((t) => {
-              t.enabled = !isVideoOff;
-            });
-            setLocalStream(fresh);
+
+            const merged = [...remainingTracks];
+            if (freshVideo) merged.push(freshVideo);
+            if (freshAudio) merged.push(freshAudio);
+
+            const updatedStream = new MediaStream(merged);
+            localStreamRef.current = updatedStream;
+            setLocalStream(updatedStream);
 
             activeCallsRef.current.forEach((call) => {
-              const videoSender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
-              const freshVideoTrack = fresh.getVideoTracks()[0];
-              if (videoSender && freshVideoTrack) videoSender.replaceTrack(freshVideoTrack).catch(console.warn);
+              const pc = call.peerConnection;
+              if (!pc) return;
 
-              const audioSender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'audio');
-              const freshAudioTrack = fresh.getAudioTracks()[0];
-              if (audioSender && freshAudioTrack) audioSender.replaceTrack(freshAudioTrack).catch(console.warn);
+              if (freshVideo) {
+                const videoSender = pc.getSenders()?.find((s: any) => s.track?.kind === 'video');
+                if (videoSender) {
+                  videoSender.replaceTrack(freshVideo).catch(console.warn);
+                } else {
+                  try { pc.addTrack(freshVideo, updatedStream); } catch {}
+                }
+              }
+
+              if (freshAudio) {
+                const audioSender = pc.getSenders()?.find((s: any) => s.track?.kind === 'audio');
+                if (audioSender) {
+                  audioSender.replaceTrack(freshAudio).catch(console.warn);
+                } else {
+                  try { pc.addTrack(freshAudio, updatedStream); } catch {}
+                }
+              }
             });
           }
-        } catch (err) {
-          console.warn('[MeetingRoom] Fallback media notice:', err);
+        } catch (err: any) {
+          console.warn('[MeetingRoom] Media check notice:', err);
+          if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
+            setMediaErrorNotice('Camera or microphone device is unavailable or permission was denied.');
+          }
         }
       }
     }
@@ -249,7 +289,7 @@ export default function MeetingRoom({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAudioMuted, isVideoOff]);
 
   // Sync track enabled flags with isAudioMuted and isVideoOff
   useEffect(() => {
@@ -390,7 +430,8 @@ export default function MeetingRoom({
             return;
           }
 
-          const outboundStream = screenStream || localStream;
+          // Always use active stream ref to prevent stale empty stream
+          const outboundStream = screenStreamRef.current || localStreamRef.current;
           call.answer(outboundStream || undefined);
 
           call.on('stream', (remoteStream: MediaStream) => {
@@ -398,14 +439,15 @@ export default function MeetingRoom({
             const callerDisplayName = call.metadata?.displayName || 'Participant';
             setPeers((prev) => {
               const updated = new Map(prev);
+              const existing = prev.get(call.peer);
               updated.set(call.peer, {
                 peerId: call.peer,
                 userId: call.metadata?.userId || call.peer,
                 displayName: callerDisplayName,
                 stream: remoteStream,
-                isAudioMuted: false,
-                isVideoOff: false,
-                isScreenSharing: false,
+                isAudioMuted: existing?.isAudioMuted ?? false,
+                isVideoOff: existing?.isVideoOff ?? false,
+                isScreenSharing: existing?.isScreenSharing ?? false,
               });
               return updated;
             });
@@ -451,9 +493,8 @@ export default function MeetingRoom({
         }
       });
       activeCallsRef.current.clear();
-      stopAllMediaTracks();
     };
-  }, [meeting.meetingCode, userId, displayName, stopAllMediaTracks]);
+  }, [meeting.meetingCode, userId, displayName]);
 
   // Signaling & Presence Sync Poll
   useEffect(() => {
@@ -481,7 +522,7 @@ export default function MeetingRoom({
                 const shouldInitiate = myPeerId && myPeerId.localeCompare(sig.from) < 0;
 
                 if (shouldInitiate && peerInstanceRef.current && !activeCallsRef.current.has(sig.from)) {
-                  const outboundStream = screenStream || localStream;
+                  const outboundStream = screenStreamRef.current || localStreamRef.current;
                   const call = peerInstanceRef.current.call(sig.from, outboundStream, {
                     metadata: { userId, displayName },
                   });
@@ -490,14 +531,15 @@ export default function MeetingRoom({
                     call.on('stream', (remoteStream: MediaStream) => {
                       setPeers((prev) => {
                         const updated = new Map(prev);
+                        const existing = prev.get(sig.from);
                         updated.set(sig.from, {
                           peerId: sig.from,
                           userId: sig.payload?.userId || sig.from,
                           displayName: sig.payload?.displayName || 'Participant',
                           stream: remoteStream,
-                          isAudioMuted: sig.payload?.isAudioMuted ?? false,
-                          isVideoOff: sig.payload?.isVideoOff ?? false,
-                          isScreenSharing: sig.payload?.isScreenSharing ?? false,
+                          isAudioMuted: sig.payload?.isAudioMuted ?? existing?.isAudioMuted ?? false,
+                          isVideoOff: sig.payload?.isVideoOff ?? existing?.isVideoOff ?? false,
+                          isScreenSharing: sig.payload?.isScreenSharing ?? existing?.isScreenSharing ?? false,
                         });
                         return updated;
                       });
@@ -538,16 +580,18 @@ export default function MeetingRoom({
               else if (sig.type === 'peer-reaction') {
                 const reactionEmoji = sig.payload?.emoji;
                 const sender = sig.payload?.senderName || 'Participant';
+                const xOffset = sig.payload?.xOffset ?? ((Math.random() - 0.5) * 160);
                 if (reactionEmoji) {
                   const newReaction: FloatingReaction = {
                     id: Math.random().toString(36).substring(2, 9),
                     emoji: reactionEmoji,
                     senderName: sender,
+                    xOffset,
                   };
                   setFloatingReactions((prev) => [...prev, newReaction]);
                   setTimeout(() => {
                     setFloatingReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
-                  }, 2800);
+                  }, 2600);
                 }
               }
 
@@ -567,11 +611,37 @@ export default function MeetingRoom({
                 if (incomingMsg && incomingMsg._id) {
                   setMessages((prev) => {
                     if (prev.some((m) => m._id === incomingMsg._id)) return prev;
-                    if (activePanel !== 'chat') {
+                    if (activePanelRef.current !== 'chat') {
                       setUnreadCount((c) => c + 1);
                     }
                     return [...prev, incomingMsg];
                   });
+                }
+              }
+
+              // 5.5 Chat message reaction sync
+              else if (sig.type === 'chat-reaction') {
+                const { messageId, emoji, userName } = sig.payload || {};
+                if (messageId && emoji && userName) {
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg._id !== messageId) return msg;
+                      const currentReactions = msg.reactions || {};
+                      const userList = currentReactions[emoji] || [];
+                      const hasReacted = userList.includes(userName);
+                      const updatedList = hasReacted
+                        ? userList.filter((name: string) => name !== userName)
+                        : [...userList, userName];
+
+                      const updatedReactions = { ...currentReactions };
+                      if (updatedList.length > 0) {
+                        updatedReactions[emoji] = updatedList;
+                      } else {
+                        delete updatedReactions[emoji];
+                      }
+                      return { ...msg, reactions: updatedReactions };
+                    })
+                  );
                 }
               }
 
@@ -615,7 +685,7 @@ export default function MeetingRoom({
               const existingIds = new Set(prev.map((m) => m._id));
               const newMsgs = chatData.messages.filter((m: IMessage) => !existingIds.has(m._id));
               if (newMsgs.length > 0) {
-                if (activePanel !== 'chat') {
+                if (activePanelRef.current !== 'chat') {
                   setUnreadCount((c) => c + newMsgs.length);
                 }
                 return [...prev, ...newMsgs];
@@ -643,13 +713,13 @@ export default function MeetingRoom({
       isAlive = false;
       clearInterval(intervalId);
     };
-  }, [meeting.meetingCode, userId, displayName, localStream, screenStream, activePanel]);
+  }, [meeting.meetingCode, userId, displayName]);
 
-  // Audio Toggle (Microphone) with AEC constraints
+  // Audio Toggle (Microphone) with reliable track lifecycle
   const handleToggleAudio = async () => {
-    let currentAudioTrack = localStream?.getAudioTracks()[0];
+    let currentAudioTrack = localStream?.getAudioTracks().find((t) => t.readyState === 'live');
 
-    if (!currentAudioTrack || currentAudioTrack.readyState === 'ended') {
+    if (!currentAudioTrack) {
       try {
         const fresh = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -659,21 +729,30 @@ export default function MeetingRoom({
           },
         });
         const freshTrack = fresh.getAudioTracks()[0];
+        if (!freshTrack) return;
         allMediaTracksRef.current.add(freshTrack);
 
-        if (localStream) {
-          localStream.addTrack(freshTrack);
-        } else {
-          setLocalStream(new MediaStream([freshTrack]));
-        }
+        const currentTracks = localStream ? localStream.getTracks() : [];
+        const nonAudioTracks = currentTracks.filter((t) => t.kind !== 'audio');
+        const newStream = new MediaStream([...nonAudioTracks, freshTrack]);
+        localStreamRef.current = newStream;
+        setLocalStream(newStream);
         currentAudioTrack = freshTrack;
 
         activeCallsRef.current.forEach((call) => {
-          const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'audio');
-          if (sender) sender.replaceTrack(freshTrack).catch(console.warn);
+          const pc = call.peerConnection;
+          if (!pc) return;
+          const sender = pc.getSenders()?.find((s: any) => s.track?.kind === 'audio');
+          if (sender) {
+            sender.replaceTrack(freshTrack).catch(console.warn);
+          } else {
+            try { pc.addTrack(freshTrack, newStream); } catch {}
+          }
         });
+        setMediaErrorNotice(null);
       } catch (err) {
         console.warn('Microphone permission denied or device error:', err);
+        setMediaErrorNotice('Microphone permission was denied or device is unavailable.');
         return;
       }
     }
@@ -686,33 +765,39 @@ export default function MeetingRoom({
     sendMediaStateSignal(isVideoOff, nextMuted, isScreenSharing);
   };
 
-  // Video Toggle (Camera)
+  // Video Toggle (Camera) with reliable track lifecycle
   const handleToggleVideo = async () => {
-    let currentVideoTrack = localStream?.getVideoTracks()[0];
+    let currentVideoTrack = localStream?.getVideoTracks().find((t) => t.readyState === 'live');
 
-    if (!currentVideoTrack || currentVideoTrack.readyState === 'ended') {
+    if (!currentVideoTrack) {
       try {
-        const fresh = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
-        const freshTrack = fresh.getVideoTracks()[0];
+        const freshTrack = await acquireCameraTrack(facingMode);
+        if (!freshTrack) return;
         allMediaTracksRef.current.add(freshTrack);
 
-        if (localStream) {
-          localStream.addTrack(freshTrack);
-        } else {
-          setLocalStream(new MediaStream([freshTrack]));
-        }
+        const currentTracks = localStream ? localStream.getTracks() : [];
+        const nonVideoTracks = currentTracks.filter((t) => t.kind !== 'video');
+        const newStream = new MediaStream([...nonVideoTracks, freshTrack]);
+        localStreamRef.current = newStream;
+        setLocalStream(newStream);
         currentVideoTrack = freshTrack;
 
         if (!isScreenSharing) {
           activeCallsRef.current.forEach((call) => {
-            const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
-            if (sender) sender.replaceTrack(freshTrack).catch(console.warn);
+            const pc = call.peerConnection;
+            if (!pc) return;
+            const sender = pc.getSenders()?.find((s: any) => s.track?.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(freshTrack).catch(console.warn);
+            } else {
+              try { pc.addTrack(freshTrack, newStream); } catch {}
+            }
           });
         }
+        setMediaErrorNotice(null);
       } catch (err) {
         console.warn('Camera permission denied or device error:', err);
+        setMediaErrorNotice('Camera permission was denied or camera device is unavailable.');
         return;
       }
     }
@@ -723,6 +808,41 @@ export default function MeetingRoom({
     setIsVideoOff(nextVideoOff);
 
     sendMediaStateSignal(nextVideoOff, isAudioMuted, isScreenSharing);
+  };
+
+  // Flip camera (front selfie <-> rear environment for smartphones)
+  const handleFlipCamera = async () => {
+    const nextFacing = facingMode === 'user' ? 'environment' : 'user';
+    try {
+      const freshTrack = await acquireCameraTrack(nextFacing);
+      if (!freshTrack) return;
+      allMediaTracksRef.current.add(freshTrack);
+
+      const currentTracks = localStreamRef.current ? localStreamRef.current.getTracks() : [];
+      const nonVideoTracks = currentTracks.filter((t) => t.kind !== 'video');
+      const newStream = new MediaStream([...nonVideoTracks, freshTrack]);
+      localStreamRef.current = newStream;
+      setLocalStream(newStream);
+      setFacingMode(nextFacing);
+      setIsVideoOff(false);
+
+      if (!isScreenSharing) {
+        activeCallsRef.current.forEach((call) => {
+          const pc = call.peerConnection;
+          if (!pc) return;
+          const sender = pc.getSenders()?.find((s: any) => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(freshTrack).catch(console.warn);
+          } else {
+            try { pc.addTrack(freshTrack, newStream); } catch {}
+          }
+        });
+      }
+      setMediaErrorNotice(null);
+    } catch (err) {
+      console.warn('Flip camera error:', err);
+      setMediaErrorNotice('Could not switch camera device.');
+    }
   };
 
   // Stop Screen Share helper
@@ -741,20 +861,21 @@ export default function MeetingRoom({
       screenTrackRef.current = null;
     }
 
-    if (screenStream) {
-      screenStream.getTracks().forEach((t) => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => {
         try {
           t.stop();
         } catch {
           // ignore
         }
       });
+      screenStreamRef.current = null;
       setScreenStream(null);
     }
 
     setIsScreenSharing(false);
 
-    const camVideoTrack = localStream?.getVideoTracks()[0];
+    const camVideoTrack = localStreamRef.current?.getVideoTracks().find((t) => t.readyState === 'live');
     activeCallsRef.current.forEach((call) => {
       const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
       if (sender && camVideoTrack) {
@@ -763,7 +884,7 @@ export default function MeetingRoom({
     });
 
     sendMediaStateSignal(isVideoOff, isAudioMuted, false);
-  }, [localStream, isVideoOff, isAudioMuted, screenStream, sendMediaStateSignal]);
+  }, [isVideoOff, isAudioMuted, sendMediaStateSignal]);
 
   // Toggle Screen Sharing
   const handleToggleScreenShare = async () => {
@@ -781,6 +902,7 @@ export default function MeetingRoom({
 
         displayStream.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
         screenTrackRef.current = screenTrack;
+        screenStreamRef.current = displayStream;
         setScreenStream(displayStream);
         setIsScreenSharing(true);
 
@@ -846,10 +968,12 @@ export default function MeetingRoom({
 
   // Send Meeting Reaction
   const handleSendReaction = (emoji: string) => {
+    const xOffset = (Math.random() - 0.5) * 160;
     const newReaction: FloatingReaction = {
       id: Math.random().toString(36).substring(2, 9),
       emoji,
       senderName: displayName,
+      xOffset,
     };
 
     setFloatingReactions((prev) => [...prev, newReaction]);
@@ -865,7 +989,43 @@ export default function MeetingRoom({
         body: JSON.stringify({
           from: myPeerId,
           type: 'peer-reaction',
-          payload: { emoji, senderName: displayName },
+          payload: { emoji, senderName: displayName, xOffset },
+        }),
+      }).catch(console.warn);
+    }
+  };
+
+  // React to a chat message
+  const handleReactToMessage = (messageId: string, emoji: string) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg._id !== messageId) return msg;
+        const currentReactions = msg.reactions || {};
+        const userList = currentReactions[emoji] || [];
+        const hasReacted = userList.includes(displayName);
+        const updatedList = hasReacted
+          ? userList.filter((name: string) => name !== displayName)
+          : [...userList, displayName];
+
+        const updatedReactions = { ...currentReactions };
+        if (updatedList.length > 0) {
+          updatedReactions[emoji] = updatedList;
+        } else {
+          delete updatedReactions[emoji];
+        }
+        return { ...msg, reactions: updatedReactions };
+      })
+    );
+
+    const myPeerId = peerInstanceRef.current?.id;
+    if (myPeerId) {
+      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: myPeerId,
+          type: 'chat-reaction',
+          payload: { messageId, emoji, userName: displayName },
         }),
       }).catch(console.warn);
     }
@@ -999,33 +1159,28 @@ export default function MeetingRoom({
     }
   }, [activeSharerPeer?.stream]);
 
-  // Gallery view dynamic grid sizing
+  // Dynamic grid sizing optimized for smartphones and desktops
   const getGridClass = () => {
-    if (totalParticipantCount === 1) return 'grid-cols-1 max-w-4xl mx-auto';
-    if (totalParticipantCount === 2) return 'grid-cols-1 md:grid-cols-2 max-w-6xl mx-auto';
+    if (totalParticipantCount === 2) return 'grid-cols-1 sm:grid-cols-2 max-w-5xl mx-auto';
     if (totalParticipantCount <= 4) return 'grid-cols-2 max-w-6xl mx-auto';
     if (totalParticipantCount <= 6) return 'grid-cols-2 md:grid-cols-3 max-w-7xl mx-auto';
     return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 max-w-7xl mx-auto';
   };
 
-  // Determine Active Speaker in Speaker View
+  // Determine Active Spotlight Participant (when pinned)
   const getSpotlightParticipant = () => {
-    if (pinnedPeerId === 'local') return { isLocal: true };
+    if (pinnedPeerId === 'local') return { isLocal: true, peer: null };
     if (pinnedPeerId) {
       const pinnedPeer = remotePeersList.find((p) => p.peerId === pinnedPeerId);
       if (pinnedPeer) return { isLocal: false, peer: pinnedPeer };
     }
-    const speakingRemote = remotePeersList.find((p) => p.isSpeaking && !p.isAudioMuted);
-    if (speakingRemote) return { isLocal: false, peer: speakingRemote };
-    if (isLocalSpeaking && !isAudioMuted) return { isLocal: true };
-    if (remotePeersList.length > 0) return { isLocal: false, peer: remotePeersList[0] };
-    return { isLocal: true };
+    return null;
   };
 
   const spotlight = getSpotlightParticipant();
 
   return (
-    <div className="relative w-screen h-screen bg-[#0e1015] text-[#f8fafc] flex flex-col overflow-hidden select-none">
+    <div className="relative w-screen h-[100dvh] bg-[#0e1015] text-[#f8fafc] flex flex-col overflow-hidden select-none">
       {/* Top Header Bar */}
       <header className="h-14 px-4 sm:px-6 flex items-center justify-between border-b border-[#242732] bg-[#16181f] z-20 shrink-0">
         <div className="flex items-center space-x-3 min-w-0">
@@ -1053,30 +1208,41 @@ export default function MeetingRoom({
             <Clock className="w-3.5 h-3.5 text-slate-400" />
             <span>{formatDuration(elapsedSeconds)}</span>
           </div>
-
-          {/* GALLERY / SPEAKER VIEW TOGGLE */}
-          <button
-            onClick={() => {
-              setViewMode((prev) => (prev === 'gallery' ? 'speaker' : 'gallery'));
-              setPinnedPeerId(null);
-            }}
-            className="flex items-center space-x-1.5 px-2.5 py-1 text-slate-300 hover:text-white hover:bg-[#1e212b] rounded-lg border border-[#242732] text-xs font-medium transition"
-            title={viewMode === 'gallery' ? 'Switch to Speaker View' : 'Switch to Gallery View'}
-          >
-            {viewMode === 'gallery' ? (
-              <>
-                <Maximize2 className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden sm:inline">Speaker View</span>
-              </>
-            ) : (
-              <>
-                <Grid className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden sm:inline">Gallery View</span>
-              </>
-            )}
-          </button>
         </div>
       </header>
+
+      {/* FLOATING REACTIONS OVERLAY */}
+      {floatingReactions.length > 0 && (
+        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+          {floatingReactions.map((r) => (
+            <div
+              key={r.id}
+              className="absolute bottom-24 sm:bottom-28 left-1/2 flex items-center space-x-2 bg-[#16181f]/95 border border-[#242732] backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-2xl animate-floating-reaction"
+              style={{ ['--x-offset' as any]: `${r.xOffset}px` }}
+            >
+              <span className="text-2xl">{r.emoji}</span>
+              <span className="text-xs text-[#f1f2f4] font-medium">{r.senderName}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Media Device Error Notice Banner */}
+      {mediaErrorNotice && (
+        <div className="bg-[#d97706]/15 border-b border-[#d97706]/35 px-4 py-2 flex items-center justify-between text-xs text-[#fbbf24] z-20 shrink-0 animate-in fade-in duration-150">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-[#fbbf24] shrink-0" />
+            <span>{mediaErrorNotice}</span>
+          </div>
+          <button
+            onClick={() => setMediaErrorNotice(null)}
+            className="p-1 hover:text-white rounded hover:bg-[#d97706]/20 transition"
+            title="Dismiss notice"
+          >
+            <CloseIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Unobtrusive acoustic feedback hint */}
       {showAcousticHint && totalParticipantCount > 1 && (
@@ -1097,26 +1263,9 @@ export default function MeetingRoom({
         </div>
       )}
 
-      {/* Main Stage & Panels */}
-      <div className="flex-1 flex overflow-hidden relative">
-        <main className="flex-1 p-3 sm:p-5 overflow-y-auto pb-24 flex flex-col items-center justify-center relative">
-          {/* FLOATING REACTIONS OVERLAY */}
-          {floatingReactions.length > 0 && (
-            <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
-              {floatingReactions.map((r, i) => (
-                <div
-                  key={r.id}
-                  className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-[#16181f]/90 border border-[#2a2d38] backdrop-blur px-3 py-1.5 rounded-full shadow-2xl animate-in slide-in-from-bottom-6 fade-in duration-300"
-                  style={{
-                    transform: `translate(${Math.sin(i * 1.5) * 60}px, -${i * 45}px)`,
-                  }}
-                >
-                  <span className="text-2xl animate-bounce">{r.emoji}</span>
-                  <span className="text-xs text-slate-300 font-medium">{r.senderName}</span>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Main Stage & Non-overlapping Floating Sidebar Layout */}
+      <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative w-full h-full p-2 sm:p-3 pb-24 gap-0 sm:gap-3 transition-all duration-300">
+        <main className="meeting-stage-area relative flex flex-col items-center justify-center overflow-y-auto w-full h-full">
 
           {/* 1. SCREEN SHARING HERO VIEW WITH PICTURE-IN-PICTURE CONTROL */}
           {isAnyoneScreenSharing ? (
@@ -1185,6 +1334,7 @@ export default function MeetingRoom({
                     displayName={displayName}
                     stream={localStream}
                     isLocal={true}
+                    isFrontFacing={facingMode === 'user'}
                     isHost={isHost}
                     isAudioMuted={isAudioMuted}
                     isVideoOff={isVideoOff}
@@ -1213,23 +1363,24 @@ export default function MeetingRoom({
                 ))}
               </div>
             </div>
-          ) : viewMode === 'speaker' ? (
-            /* 2. SPEAKER VIEW LAYOUT */
+          ) : pinnedPeerId && spotlight ? (
+            /* 2. PINNED PARTICIPANT SPOTLIGHT VIEW */
             <div className="w-full h-full max-w-7xl flex flex-col space-y-3">
-              {/* Primary Active Speaker Focal Stage */}
-              <div className="relative flex-1 min-h-[50vh] max-h-[72vh] rounded-xl overflow-hidden border border-[#242732] shadow-2xl flex items-center justify-center">
+              {/* Primary Focused Stage */}
+              <div className="relative flex-1 aspect-[4/3] sm:aspect-video min-h-[36vh] sm:min-h-[50vh] max-h-[68vh] rounded-xl overflow-hidden border border-[#242732] shadow-2xl flex items-center justify-center mx-auto w-full">
                 {spotlight.isLocal ? (
                   <VideoTile
                     displayName={displayName}
                     stream={localStream}
                     isLocal={true}
+                    isFrontFacing={facingMode === 'user'}
                     isHost={isHost}
                     isAudioMuted={isAudioMuted}
                     isVideoOff={isVideoOff}
                     isSpeaking={isLocalSpeaking}
                     isHandRaised={isLocalHandRaised}
-                    isPinned={pinnedPeerId === 'local'}
-                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
+                    isPinned={true}
+                    onTogglePin={() => setPinnedPeerId(null)}
                   />
                 ) : (
                   <VideoTile
@@ -1241,15 +1392,13 @@ export default function MeetingRoom({
                     isVideoOff={spotlight.peer!.isVideoOff}
                     isSpeaking={spotlight.peer!.isSpeaking}
                     isHandRaised={!!remoteHands.get(spotlight.peer!.peerId)}
-                    isPinned={pinnedPeerId === spotlight.peer!.peerId}
-                    onTogglePin={() =>
-                      setPinnedPeerId(pinnedPeerId === spotlight.peer!.peerId ? null : spotlight.peer!.peerId)
-                    }
+                    isPinned={true}
+                    onTogglePin={() => setPinnedPeerId(null)}
                   />
                 )}
               </div>
 
-              {/* Speaker View Filmstrip for Remaining Participants */}
+              {/* Filmstrip for Remaining Participants */}
               {totalParticipantCount > 1 && (
                 <div className="h-28 sm:h-32 flex items-center space-x-3 overflow-x-auto pb-1 shrink-0">
                   {/* If spotlight is remote, local user goes in filmstrip */}
@@ -1259,12 +1408,13 @@ export default function MeetingRoom({
                         displayName={displayName}
                         stream={localStream}
                         isLocal={true}
+                        isFrontFacing={facingMode === 'user'}
                         isHost={isHost}
                         isAudioMuted={isAudioMuted}
                         isVideoOff={isVideoOff}
                         isSpeaking={isLocalSpeaking}
                         isHandRaised={isLocalHandRaised}
-                        isPinned={pinnedPeerId === 'local'}
+                        isPinned={false}
                         onTogglePin={() => setPinnedPeerId('local')}
                       />
                     </div>
@@ -1284,7 +1434,7 @@ export default function MeetingRoom({
                           isVideoOff={peer.isVideoOff}
                           isSpeaking={peer.isSpeaking}
                           isHandRaised={!!remoteHands.get(peer.peerId)}
-                          isPinned={pinnedPeerId === peer.peerId}
+                          isPinned={false}
                           onTogglePin={() => setPinnedPeerId(peer.peerId)}
                         />
                       </div>
@@ -1293,77 +1443,98 @@ export default function MeetingRoom({
               )}
             </div>
           ) : (
-            /* 3. GALLERY VIEW GRID */
-            <div className={`w-full h-full max-h-[82vh] grid gap-3 sm:gap-4 ${getGridClass()}`}>
-              <VideoTile
-                displayName={displayName}
-                stream={localStream}
-                isLocal={true}
-                isHost={isHost}
-                isAudioMuted={isAudioMuted}
-                isVideoOff={isVideoOff}
-                isSpeaking={isLocalSpeaking}
-                isHandRaised={isLocalHandRaised}
-                isPinned={pinnedPeerId === 'local'}
-                onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
-              />
+            /* 3. RESPONSIVE PARTICIPANT GRID */
+            <div className="w-full h-full flex flex-col items-center justify-center">
+              {totalParticipantCount === 1 ? (
+                <div className="w-full max-w-sm sm:max-w-3xl md:max-w-4xl aspect-[3/4] sm:aspect-video max-h-[75vh] sm:max-h-[82vh] mx-auto flex items-center justify-center p-1 sm:p-0">
+                  <VideoTile
+                    displayName={displayName}
+                    stream={localStream}
+                    isLocal={true}
+                    isFrontFacing={facingMode === 'user'}
+                    isHost={isHost}
+                    isAudioMuted={isAudioMuted}
+                    isVideoOff={isVideoOff}
+                    isSpeaking={isLocalSpeaking}
+                    isHandRaised={isLocalHandRaised}
+                    isPinned={pinnedPeerId === 'local'}
+                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
+                  />
+                </div>
+              ) : (
+                <div className={`w-full h-full max-h-[82vh] grid gap-2 sm:gap-4 ${getGridClass()}`}>
+                  <VideoTile
+                    displayName={displayName}
+                    stream={localStream}
+                    isLocal={true}
+                    isFrontFacing={facingMode === 'user'}
+                    isHost={isHost}
+                    isAudioMuted={isAudioMuted}
+                    isVideoOff={isVideoOff}
+                    isSpeaking={isLocalSpeaking}
+                    isHandRaised={isLocalHandRaised}
+                    isPinned={pinnedPeerId === 'local'}
+                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
+                  />
 
-              {remotePeersList.map((peer) => (
-                <VideoTile
-                  key={peer.peerId}
-                  displayName={peer.displayName}
-                  stream={peer.stream}
-                  isLocal={false}
-                  isHost={peer.userId === meeting.hostUserId}
-                  isAudioMuted={peer.isAudioMuted}
-                  isVideoOff={peer.isVideoOff}
-                  isSpeaking={peer.isSpeaking}
-                  isHandRaised={!!remoteHands.get(peer.peerId)}
-                  isPinned={pinnedPeerId === peer.peerId}
-                  onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
-                />
-              ))}
+                  {remotePeersList.map((peer) => (
+                    <VideoTile
+                      key={peer.peerId}
+                      displayName={peer.displayName}
+                      stream={peer.stream}
+                      isLocal={false}
+                      isHost={peer.userId === meeting.hostUserId}
+                      isAudioMuted={peer.isAudioMuted}
+                      isVideoOff={peer.isVideoOff}
+                      isSpeaking={peer.isSpeaking}
+                      isHandRaised={!!remoteHands.get(peer.peerId)}
+                      isPinned={pinnedPeerId === peer.peerId}
+                      onTogglePin={() => setPinnedPeerId(pinnedPeerId === peer.peerId ? null : peer.peerId)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </main>
 
-        {/* Chat Panel */}
-        {activePanel === 'chat' && (
-          <ChatPanel
-            messages={messages}
-            currentUserId={userId}
-            currentDisplayName={displayName}
-            onSendMessage={handleSendMessage}
-            onClose={() => {
-              setActivePanel('none');
-              setUnreadCount(0);
-            }}
-          />
-        )}
-
-        {/* Participants Panel - Shown by default */}
-        {activePanel === 'participants' && (
-          <ParticipantsPanel
-            currentUserId={userId}
-            currentDisplayName={displayName}
-            isHost={isHost}
-            localAudioMuted={isAudioMuted}
-            localVideoOff={isVideoOff}
-            localHandRaised={isLocalHandRaised}
-            remotePeers={remotePeersList}
-            remoteHands={remoteHands}
-            meetingCode={meeting.meetingCode}
-            onMuteParticipant={handleMuteParticipant}
-            onKickParticipant={handleKickParticipant}
-            onMuteAll={() => remotePeersList.forEach((p) => handleMuteParticipant(p.peerId))}
-            onClose={() => setActivePanel('none')}
-          />
-        )}
-
-        {/* Meeting Info Panel */}
-        {activePanel === 'info' && (
-          <InfoPanel meeting={meeting} onClose={() => setActivePanel('none')} />
-        )}
+        {/* Sidebar Layout Slot - Takes actual layout space on the right, animated width expansion */}
+        <div
+          className={`meeting-sidebar-slot shrink-0 flex flex-col ${
+            activePanel !== 'none'
+              ? 'w-full sm:w-84 md:w-92 lg:w-96 opacity-100 max-sm:h-[45vh] sm:h-full mt-2 sm:mt-0'
+              : 'w-0 opacity-0 pointer-events-none max-sm:h-0 sm:h-full overflow-hidden'
+          }`}
+        >
+          {activePanel !== 'none' && (
+            <FloatingSidebar
+              className="h-full w-full surface-floating-panel rounded-2xl flex flex-col overflow-hidden border border-[#242732] shadow-xl"
+              activePanel={activePanel}
+              onSwitchPanel={(panel) => {
+                setActivePanel(panel);
+                if (panel === 'chat') setUnreadCount(0);
+              }}
+              onClose={() => setActivePanel('none')}
+              messages={messages}
+              currentUserId={userId}
+              currentDisplayName={displayName}
+              onSendMessage={handleSendMessage}
+              onReactToMessage={handleReactToMessage}
+              unreadCount={unreadCount}
+              isHost={isHost}
+              localAudioMuted={isAudioMuted}
+              localVideoOff={isVideoOff}
+              localHandRaised={isLocalHandRaised}
+              remotePeers={remotePeersList}
+              remoteHands={remoteHands}
+              meetingCode={meeting.meetingCode}
+              onMuteParticipant={handleMuteParticipant}
+              onKickParticipant={handleKickParticipant}
+              onMuteAll={() => remotePeersList.forEach((p) => handleMuteParticipant(p.peerId))}
+              meeting={meeting}
+            />
+          )}
+        </div>
       </div>
 
       {/* Floating Bottom Control Bar */}
@@ -1378,6 +1549,7 @@ export default function MeetingRoom({
         isHandRaised={isLocalHandRaised}
         onToggleAudio={handleToggleAudio}
         onToggleVideo={handleToggleVideo}
+        onFlipCamera={handleFlipCamera}
         onToggleScreenShare={handleToggleScreenShare}
         onTogglePanel={(panel) => {
           setActivePanel(activePanel === panel ? 'none' : panel);
