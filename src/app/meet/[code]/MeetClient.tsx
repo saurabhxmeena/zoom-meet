@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { IMeeting, IUser } from '@/lib/types';
 import Lobby from '@/components/Lobby';
 import MeetingRoom from '@/components/MeetingRoom';
-import { AlertCircle, ArrowLeft, Loader2, Video } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
 interface MeetClientProps {
@@ -20,7 +20,6 @@ export default function MeetClient({ code }: MeetClientProps) {
   const [currentUser, setCurrentUser] = useState<IUser | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // In-meeting state once Lobby completed
   const [joined, setJoined] = useState(false);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
@@ -35,7 +34,6 @@ export default function MeetClient({ code }: MeetClientProps) {
         setLoading(true);
         setError(null);
 
-        // 1. Fetch current user session
         try {
           const userRes = await fetch('/api/auth/me');
           if (userRes.ok) {
@@ -48,12 +46,11 @@ export default function MeetClient({ code }: MeetClientProps) {
           // ignore session fetch error
         }
 
-        // 2. Fetch meeting details
         const meetRes = await fetch(`/api/meetings/${code}`);
         const meetData = await meetRes.json();
 
         if (!meetRes.ok || !meetData.meeting) {
-          setError(meetData.error || 'Meeting not found. Please verify the meeting ID.');
+          setError(meetData.error || 'Meeting not found. Please verify the code.');
           setLoading(false);
           return;
         }
@@ -115,34 +112,26 @@ export default function MeetClient({ code }: MeetClientProps) {
 
   if (loading && !joined) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4 text-white">
-        <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 animate-pulse">
-          <Video className="w-6 h-6" />
-        </div>
-        <div className="flex items-center space-x-2 text-slate-400 text-sm">
-          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-          <span>Connecting to meeting room...</span>
-        </div>
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-3 text-[#f5f5f7]">
+        <Loader2 className="w-5 h-5 animate-spin text-[#86868b]" />
+        <span className="text-xs text-[#86868b]">Loading meeting...</span>
       </div>
     );
   }
 
   if (error && !joined) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
-          <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 mx-auto flex items-center justify-center">
-            <AlertCircle className="w-6 h-6" />
-          </div>
-          <h2 className="text-lg font-bold text-white">Unable to Join Meeting</h2>
-          <p className="text-xs text-slate-400 leading-relaxed">{error}</p>
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 text-[#f5f5f7]">
+        <div className="bg-[#161618] border border-white/[0.08] rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center space-y-4 shadow-xl">
+          <h2 className="text-sm font-semibold text-[#f5f5f7]">Unable to Join</h2>
+          <p className="text-xs text-[#86868b] leading-relaxed">{error}</p>
           <div className="pt-2">
             <Link
               href="/"
-              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-blue-500/20 transition"
+              className="inline-flex items-center space-x-1.5 px-4 py-2 bg-white/[0.08] hover:bg-white/[0.14] text-[#f5f5f7] rounded-xl text-xs font-medium transition"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back to Home</span>
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Meetings</span>
             </Link>
           </div>
         </div>

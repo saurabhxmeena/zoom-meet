@@ -2,116 +2,72 @@
 
 @layer base {
   :root {
-    --background: #090d16;
-    --surface: #111827;
-    --surface-hover: #1f2937;
-    --border: #1f293d;
-    --foreground: #f3f4f6;
-    --primary: #0e71eb;
-    --primary-hover: #0b5cce;
-    --accent-green: #10b981;
-    --danger: #ef4444;
+    --bg-base: #000000;
+    --bg-surface: #161618;
+    --bg-surface-elevated: #1c1c1e;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-hover: rgba(255, 255, 255, 0.16);
+    --text-primary: #f5f5f7;
+    --text-secondary: #86868b;
+    --text-tertiary: #515154;
+    --accent: #2997ff;
+    --accent-hover: #0077ed;
+    --destructive: #ff453a;
+    --destructive-hover: #d73a31;
+    --success: #30d158;
   }
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-feature-settings: "rlig" 1, "calt" 1;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
   overflow-x: hidden;
   min-height: 100vh;
 }
 
-/* Custom Scrollbar for Chat & Participants */
+/* Subtle, minimal Apple-like scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.6);
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.9);
+  background: rgba(255, 255, 255, 0.25);
 }
 
-/* Glassmorphism Classes */
-.glass-panel {
-  background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+/* Apple-style Translucent Material */
+.apple-glass {
+  background: rgba(28, 28, 30, 0.72);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.glass-toolbar {
-  background: rgba(15, 23, 42, 0.88);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+.apple-card {
+  background: #161618;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
 }
 
-.glass-card {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+/* Minimal active speaker indicator */
+.speaker-active {
+  box-shadow: 0 0 0 1.5px #2997ff;
 }
 
-/* Speaker Glowing Pulse */
-@keyframes speaker-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 2px #10b981, 0 0 15px rgba(16, 185, 129, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 4px #10b981, 0 0 25px rgba(16, 185, 129, 0.7);
-  }
+/* Smooth subtle transitions */
+button, input, a {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-.active-speaker-ring {
-  animation: speaker-pulse 1.8s infinite ease-in-out;
-}
-
-/* Floating Emoji Reaction Animation */
-@keyframes floatUpAndFade {
-  0% {
-    transform: translateY(0) scale(0.6);
-    opacity: 0;
-  }
-  15% {
-    transform: translateY(-20px) scale(1.2);
-    opacity: 1;
-  }
-  80% {
-    transform: translateY(-160px) scale(1);
-    opacity: 0.9;
-  }
-  100% {
-    transform: translateY(-220px) scale(0.8);
-    opacity: 0;
-  }
-}
-
-.floating-reaction {
-  animation: floatUpAndFade 2.6s forwards cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-/* Audio Wave Visualizer Bars */
-@keyframes audioWave {
-  0%, 100% {
-    height: 4px;
-  }
-  50% {
-    height: 18px;
-  }
-}
-
-.wave-bar-1 { animation: audioWave 0.6s infinite ease-in-out; }
-.wave-bar-2 { animation: audioWave 0.8s infinite ease-in-out 0.15s; }
-.wave-bar-3 { animation: audioWave 0.7s infinite ease-in-out 0.3s; }
-.wave-bar-4 { animation: audioWave 0.9s infinite ease-in-out 0.1s; }

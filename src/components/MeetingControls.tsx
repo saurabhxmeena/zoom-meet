@@ -9,14 +9,8 @@ import {
   Share2,
   Users,
   MessageSquare,
-  Smile,
   PhoneOff,
-  Shield,
-  Copy,
-  Check,
-  ChevronUp,
-  Settings,
-  Sparkles,
+  Info,
 } from 'lucide-react';
 
 interface MeetingControlsProps {
@@ -31,13 +25,9 @@ interface MeetingControlsProps {
   onToggleVideo: () => void;
   onToggleScreenShare: () => void;
   onTogglePanel: (panel: 'chat' | 'participants' | 'info') => void;
-  onSendReaction: (emoji: string) => void;
   onLeaveMeeting: () => void;
   onEndMeetingForAll?: () => void;
-  onOpenSettings?: () => void;
 }
-
-const EMOJI_REACTIONS = ['👏', '❤️', '👍', '🙋‍♂️', '🎉', '😂', '🔥'];
 
 export default function MeetingControls({
   isAudioMuted,
@@ -51,171 +41,128 @@ export default function MeetingControls({
   onToggleVideo,
   onToggleScreenShare,
   onTogglePanel,
-  onSendReaction,
   onLeaveMeeting,
   onEndMeetingForAll,
-  onOpenSettings,
 }: MeetingControlsProps) {
-  const [showReactions, setShowReactions] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
 
   return (
     <>
-      <footer className="fixed bottom-0 left-0 right-0 z-30 p-4 flex items-center justify-center pointer-events-none">
-        <div className="glass-toolbar px-4 py-2.5 rounded-2xl flex items-center space-x-2 sm:space-x-3 pointer-events-auto shadow-2xl">
+      <footer className="fixed bottom-0 left-0 right-0 z-30 p-4 sm:p-6 flex items-center justify-center pointer-events-none">
+        <div className="bg-[#1c1c1e]/80 backdrop-blur-2xl border border-white/[0.08] px-3 py-2 rounded-2xl flex items-center space-x-2 sm:space-x-3 pointer-events-auto shadow-2xl">
           
           {/* Microphone */}
           <button
             onClick={onToggleAudio}
-            className={`flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               isAudioMuted
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
+                ? 'bg-[#ff453a] text-white hover:bg-[#d73a31]'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
             }`}
-            title={isAudioMuted ? 'Unmute (Cmd/Ctrl + D)' : 'Mute'}
+            title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
           >
-            {isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-            <span className="text-[10px] mt-0.5">{isAudioMuted ? 'Unmute' : 'Mute'}</span>
+            {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </button>
 
           {/* Camera */}
           <button
             onClick={onToggleVideo}
-            className={`flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               isVideoOff
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
+                ? 'bg-[#ff453a] text-white hover:bg-[#d73a31]'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
             }`}
-            title={isVideoOff ? 'Start Video (Cmd/Ctrl + E)' : 'Stop Video'}
+            title={isVideoOff ? 'Start video' : 'Stop video'}
           >
-            {isVideoOff ? <VideoOff className="w-5 h-5" /> : <VideoIcon className="w-5 h-5" />}
-            <span className="text-[10px] mt-0.5">{isVideoOff ? 'Start Video' : 'Stop Video'}</span>
+            {isVideoOff ? <VideoOff className="w-4 h-4" /> : <VideoIcon className="w-4 h-4" />}
           </button>
 
-          <div className="w-[1px] h-8 bg-slate-800 mx-1 hidden sm:block" />
+          <div className="w-[1px] h-6 bg-white/[0.08] mx-0.5" />
 
           {/* Screen Share */}
           <button
             onClick={onToggleScreenShare}
-            className={`flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               isScreenSharing
-                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 ring-1 ring-emerald-500/50'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
+                ? 'bg-[#2997ff] text-white'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
             }`}
-            title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+            title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
           >
-            <Share2 className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5">{isScreenSharing ? 'Stop Share' : 'Share'}</span>
-          </button>
-
-          {/* Participants */}
-          <button
-            onClick={() => onTogglePanel('participants')}
-            className={`relative flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
-              activePanel === 'participants'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
-            }`}
-            title="Participants"
-          >
-            <Users className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5">People</span>
-            {participantCount > 0 && (
-              <span className="absolute top-1 right-2 bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full">
-                {participantCount}
-              </span>
-            )}
+            <Share2 className="w-4 h-4" />
           </button>
 
           {/* Chat */}
           <button
             onClick={() => onTogglePanel('chat')}
-            className={`relative flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
+            className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition ${
               activePanel === 'chat'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
+                ? 'bg-[#2997ff] text-white'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
             }`}
-            title="In-Meeting Chat"
+            title="Chat"
           >
-            <MessageSquare className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5">Chat</span>
+            <MessageSquare className="w-4 h-4" />
             {unreadCount > 0 && activePanel !== 'chat' && (
-              <span className="absolute top-1 right-2 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full animate-bounce">
-                {unreadCount}
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#2997ff]" />
+            )}
+          </button>
+
+          {/* Participants */}
+          <button
+            onClick={() => onTogglePanel('participants')}
+            className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition ${
+              activePanel === 'participants'
+                ? 'bg-[#2997ff] text-white'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
+            }`}
+            title="Participants"
+          >
+            <Users className="w-4 h-4" />
+            {participantCount > 1 && (
+              <span className="absolute -top-1 -right-1 px-1 bg-white/[0.16] text-[#f5f5f7] text-[10px] font-medium rounded-full">
+                {participantCount}
               </span>
             )}
           </button>
 
-          {/* Reactions Popover */}
-          <div className="relative">
-            <button
-              onClick={() => setShowReactions(!showReactions)}
-              className={`flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
-                showReactions
-                  ? 'bg-slate-700 text-amber-400'
-                  : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
-              }`}
-              title="Send Reaction"
-            >
-              <Smile className="w-5 h-5" />
-              <span className="text-[10px] mt-0.5">React</span>
-            </button>
-
-            {showReactions && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 p-2 rounded-2xl shadow-2xl flex items-center space-x-1.5 animate-in fade-in zoom-in-95 duration-150">
-                {EMOJI_REACTIONS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => {
-                      onSendReaction(emoji);
-                      setShowReactions(false);
-                    }}
-                    className="p-2 text-xl hover:scale-125 transition-transform duration-150 rounded-xl hover:bg-slate-800"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Info & Invite Link */}
+          {/* Meeting Info */}
           <button
             onClick={() => onTogglePanel('info')}
-            className={`flex flex-col items-center justify-center w-12 sm:w-14 h-12 rounded-xl transition ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               activePanel === 'info'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800/80 text-slate-200 hover:bg-slate-700/80'
+                ? 'bg-[#2997ff] text-white'
+                : 'bg-white/[0.08] text-[#f5f5f7] hover:bg-white/[0.14]'
             }`}
-            title="Meeting Details & Invite"
+            title="Meeting details"
           >
-            <Shield className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5">Info</span>
+            <Info className="w-4 h-4" />
           </button>
 
-          <div className="w-[1px] h-8 bg-slate-800 mx-1 hidden sm:block" />
+          <div className="w-[1px] h-6 bg-white/[0.08] mx-0.5" />
 
           {/* Leave Button */}
           <button
             onClick={() => setShowLeaveModal(true)}
-            className="flex flex-col items-center justify-center px-4 h-12 bg-red-600 hover:bg-red-500 text-white rounded-xl shadow-lg shadow-red-600/30 transition group"
-            title="Leave Meeting"
+            className="h-10 px-3.5 bg-[#ff453a] hover:bg-[#d73a31] active:scale-[0.98] text-white rounded-xl transition flex items-center space-x-1.5 text-xs font-medium"
+            title="Leave meeting"
           >
-            <PhoneOff className="w-5 h-5 group-hover:scale-110 transition-transform" />
-            <span className="text-[10px] mt-0.5 font-semibold">End</span>
+            <PhoneOff className="w-4 h-4" />
+            <span className="hidden sm:inline">Leave</span>
           </button>
+
         </div>
       </footer>
 
-      {/* Leave / End Meeting Modal */}
+      {/* Leave Modal */}
       {showLeaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-white">Leave or End Meeting</h3>
-            <p className="text-xs text-slate-400">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-sm font-semibold text-[#f5f5f7]">Leave Meeting</h3>
+            <p className="text-xs text-[#86868b] leading-relaxed">
               {isHost
-                ? 'As the host, you can end the meeting for all participants or leave while allowing others to continue.'
-                : 'Are you sure you want to exit this meeting?'}
+                ? 'As host, you can end this meeting for everyone or leave the room.'
+                : 'Are you sure you want to leave this meeting?'}
             </p>
 
             <div className="space-y-2 pt-2">
@@ -225,9 +172,9 @@ export default function MeetingControls({
                     setShowLeaveModal(false);
                     onEndMeetingForAll();
                   }}
-                  className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-red-600/25 transition"
+                  className="w-full py-2.5 bg-[#ff453a] hover:bg-[#d73a31] text-white text-xs font-medium rounded-xl transition"
                 >
-                  End Meeting for All (FR-07)
+                  End Meeting for All
                 </button>
               )}
 
@@ -236,14 +183,14 @@ export default function MeetingControls({
                   setShowLeaveModal(false);
                   onLeaveMeeting();
                 }}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs rounded-xl transition"
+                className="w-full py-2.5 bg-white/[0.08] hover:bg-white/[0.12] text-[#f5f5f7] text-xs font-medium rounded-xl transition"
               >
                 Leave Meeting
               </button>
 
               <button
                 onClick={() => setShowLeaveModal(false)}
-                className="w-full py-2 text-slate-400 hover:text-white text-xs transition"
+                className="w-full py-2 text-[#86868b] hover:text-[#f5f5f7] text-xs transition"
               >
                 Cancel
               </button>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Calendar, Lock, Shield, Video, Sparkles } from 'lucide-react';
+import { X } from 'lucide-react';
 import { IMeeting } from '@/lib/types';
 
 interface ScheduleModalProps {
@@ -14,10 +14,10 @@ interface ScheduleModalProps {
 export default function ScheduleModal({
   onClose,
   onMeetingScheduled,
-  defaultHostName = 'Host User',
+  defaultHostName = 'Host',
   defaultHostUserId = 'user_1',
 }: ScheduleModalProps) {
-  const [title, setTitle] = useState('Minor Project Review');
+  const [title, setTitle] = useState('New Meeting');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('14:00');
   const [passcode, setPasscode] = useState('');
@@ -65,139 +65,119 @@ export default function ScheduleModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              <Calendar className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Schedule Meeting</h2>
-              <p className="text-xs text-slate-400">Configure meeting parameters and security</p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.06]">
+          <h2 className="text-sm font-semibold text-[#f5f5f7]">Schedule Meeting</h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+            className="p-1 text-[#86868b] hover:text-[#f5f5f7] rounded-md transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400">
+            <div className="p-2.5 rounded-lg bg-[#ff453a]/10 border border-[#ff453a]/20 text-[#ff453a]">
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-slate-300 font-medium mb-1.5">Meeting Topic / Title</label>
+            <label className="block text-[#86868b] font-medium mb-1.5">Topic</label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              placeholder="e.g. IT Department Session 2026-2027"
+              className="w-full h-10 px-3 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-[#f5f5f7] transition"
+              placeholder="Meeting topic"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-300 font-medium mb-1.5">Date</label>
+              <label className="block text-[#86868b] font-medium mb-1.5">Date</label>
               <input
                 type="date"
                 required
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                className="w-full h-10 px-3 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-[#f5f5f7] transition"
               />
             </div>
             <div>
-              <label className="block text-slate-300 font-medium mb-1.5">Time</label>
+              <label className="block text-[#86868b] font-medium mb-1.5">Time</label>
               <input
                 type="time"
                 required
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                className="w-full h-10 px-3 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-[#f5f5f7] transition"
               />
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-800 space-y-3">
-            <span className="font-semibold text-slate-200">Security & Controls</span>
-
+          <div className="pt-2 border-t border-white/[0.04] space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="text-slate-300 flex items-center space-x-2">
-                <Lock className="w-4 h-4 text-slate-400" />
-                <span>Require Meeting Passcode</span>
-              </label>
+              <span className="text-[#86868b]">Require passcode</span>
               <input
                 type="checkbox"
                 checked={requirePasscode}
                 onChange={(e) => setRequirePasscode(e.target.checked)}
-                className="rounded border-slate-700 text-blue-600 focus:ring-0 bg-slate-800"
+                className="rounded border-white/[0.2] bg-black text-[#2997ff] focus:ring-0"
               />
             </div>
 
             {requirePasscode && (
               <input
                 type="text"
-                placeholder="Enter room passcode (e.g. 123456)"
+                placeholder="Passcode"
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                className="w-full h-10 px-3 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-[#f5f5f7] transition"
               />
             )}
 
             <div className="flex items-center justify-between">
-              <label className="text-slate-300">Allow Screen Sharing for Participants</label>
+              <span className="text-[#86868b]">Allow screen sharing</span>
               <input
                 type="checkbox"
                 checked={allowScreenShare}
                 onChange={(e) => setAllowScreenShare(e.target.checked)}
-                className="rounded border-slate-700 text-blue-600 focus:ring-0 bg-slate-800"
+                className="rounded border-white/[0.2] bg-black text-[#2997ff] focus:ring-0"
               />
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="text-slate-300">Mute Participants upon Entry</label>
+              <span className="text-[#86868b]">Mute on entry</span>
               <input
                 type="checkbox"
                 checked={muteOnEntry}
                 onChange={(e) => setMuteOnEntry(e.target.checked)}
-                className="rounded border-slate-700 text-blue-600 focus:ring-0 bg-slate-800"
+                className="rounded border-white/[0.2] bg-black text-[#2997ff] focus:ring-0"
               />
             </div>
           </div>
 
-          <div className="pt-4 flex items-center justify-end space-x-2">
+          <div className="pt-3 flex items-center justify-end space-x-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition"
+              className="px-4 py-2 text-[#86868b] hover:text-[#f5f5f7] text-xs font-medium rounded-xl transition"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl shadow-lg shadow-blue-500/20 transition flex items-center space-x-1.5"
+              className="px-4 py-2 bg-[#2997ff] hover:bg-[#0077ed] active:scale-[0.99] text-white text-xs font-medium rounded-xl transition"
             >
-              {isSubmitting ? (
-                <span>Generating Code...</span>
-              ) : (
-                <>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Create Meeting</span>
-                </>
-              )}
+              {isSubmitting ? 'Scheduling...' : 'Schedule'}
             </button>
           </div>
         </form>

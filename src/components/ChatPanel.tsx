@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, MessageSquare, Database } from 'lucide-react';
+import { X, ArrowUp } from 'lucide-react';
 import { IMessage } from '@/lib/types';
 
 interface ChatPanelProps {
@@ -15,7 +15,6 @@ interface ChatPanelProps {
 export default function ChatPanel({
   messages,
   currentUserId,
-  currentDisplayName,
   onSendMessage,
   onClose,
 }: ChatPanelProps) {
@@ -38,37 +37,29 @@ export default function ChatPanel({
   };
 
   return (
-    <aside className="w-80 sm:w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
+    <aside className="w-80 sm:w-88 h-full bg-[#161618] border-l border-white/[0.06] flex flex-col z-30 shadow-2xl">
       
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800 bg-slate-950/70">
-        <div className="flex items-center space-x-2">
-          <MessageSquare className="w-4 h-4 text-blue-400" />
-          <h3 className="text-sm font-semibold text-white">In-Meeting Chat</h3>
-          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">
-            {messages.length}
-          </span>
-        </div>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
+        <h3 className="text-xs font-semibold text-[#f5f5f7] tracking-tight">Chat</h3>
         <button
           onClick={onClose}
-          className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+          className="p-1 text-[#86868b] hover:text-[#f5f5f7] rounded-md transition"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Messages List */}
+      {/* Message List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
-            <MessageSquare className="w-8 h-8 opacity-40" />
-            <p className="text-xs">No messages yet in this meeting.</p>
-            <p className="text-[11px] text-slate-600">Messages sent here are visible to everyone.</p>
+          <div className="h-full flex flex-col items-center justify-center text-center text-[#515154]">
+            <p className="text-xs">No messages yet.</p>
           </div>
         ) : (
           messages.map((msg) => {
             const isMe = msg.senderUserId === currentUserId;
-            const timeFormatted = new Date(msg.createdAt).toLocaleTimeString([], {
+            const time = new Date(msg.createdAt).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
             });
@@ -78,22 +69,25 @@ export default function ChatPanel({
                 key={msg._id}
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
-                <div className="flex items-center space-x-1.5 mb-1 px-1">
-                  <span className="font-semibold text-slate-300">
-                    {isMe ? 'You' : msg.senderName}
+                {!isMe && (
+                  <span className="text-[11px] text-[#86868b] mb-1 px-1">
+                    {msg.senderName}
                   </span>
-                  <span className="text-[10px] text-slate-500">{timeFormatted}</span>
-                </div>
+                )}
 
                 <div
-                  className={`p-3 rounded-2xl max-w-[85%] break-words leading-relaxed ${
+                  className={`px-3 py-2 rounded-2xl max-w-[85%] break-words leading-relaxed text-xs ${
                     isMe
-                      ? 'bg-blue-600 text-white rounded-tr-none shadow-md shadow-blue-600/20'
-                      : 'bg-slate-800/90 text-slate-200 rounded-tl-none border border-slate-700/60'
+                      ? 'bg-[#2997ff] text-white rounded-tr-sm'
+                      : 'bg-[#242426] text-[#f5f5f7] rounded-tl-sm'
                   }`}
                 >
                   {msg.text}
                 </div>
+
+                <span className="text-[10px] text-[#515154] mt-0.5 px-1">
+                  {time}
+                </span>
               </div>
             );
           })
@@ -101,31 +95,22 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Footer Info Pill */}
-      <div className="px-4 py-1.5 bg-slate-950/50 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-        <span className="flex items-center gap-1">
-          <Database className="w-3 h-3 text-emerald-400" />
-          <span>MongoDB Persisted (FR-05)</span>
-        </span>
-        <span>{1000 - inputText.length} chars left</span>
-      </div>
-
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-3 bg-slate-950 border-t border-slate-800 flex items-center space-x-2">
+      {/* Input */}
+      <form onSubmit={handleSubmit} className="p-3 border-t border-white/[0.06] flex items-center space-x-2">
         <input
           type="text"
           maxLength={1000}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Send a message to everyone..."
-          className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          placeholder="Send a message..."
+          className="flex-1 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl px-3 py-2 text-xs text-[#f5f5f7] placeholder-[#515154] transition"
         />
         <button
           type="submit"
           disabled={!inputText.trim()}
-          className="p-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white rounded-xl transition shadow-md shadow-blue-600/20"
+          className="w-8 h-8 rounded-full bg-[#2997ff] hover:bg-[#0077ed] disabled:opacity-30 disabled:hover:bg-[#2997ff] text-white flex items-center justify-center transition shrink-0"
         >
-          <Send className="w-4 h-4" />
+          <ArrowUp className="w-4 h-4" />
         </button>
       </form>
 

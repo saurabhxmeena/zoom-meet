@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Shield, Copy, Check, Lock, Radio, Globe } from 'lucide-react';
+import { X, Copy, Check } from 'lucide-react';
 import { IMeeting } from '@/lib/types';
 
 interface InfoPanelProps {
@@ -17,21 +17,18 @@ export default function InfoPanel({ meeting, onClose }: InfoPanelProps) {
   const handleCopy = () => {
     navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1800);
   };
 
   return (
-    <aside className="w-80 sm:w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
+    <aside className="w-80 sm:w-88 h-full bg-[#161618] border-l border-white/[0.06] flex flex-col z-30 shadow-2xl">
       
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800 bg-slate-950/70">
-        <div className="flex items-center space-x-2">
-          <Shield className="w-4 h-4 text-blue-400" />
-          <h3 className="text-sm font-semibold text-white">Meeting Information</h3>
-        </div>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
+        <h3 className="text-xs font-semibold text-[#f5f5f7] tracking-tight">Meeting Details</h3>
         <button
           onClick={onClose}
-          className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+          className="p-1 text-[#86868b] hover:text-[#f5f5f7] rounded-md transition"
         >
           <X className="w-4 h-4" />
         </button>
@@ -39,56 +36,40 @@ export default function InfoPanel({ meeting, onClose }: InfoPanelProps) {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
-        {/* Topic */}
-        <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-1">
-          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Topic</span>
-          <h4 className="text-sm font-bold text-white">{meeting.title}</h4>
-          <p className="text-slate-400 text-[11px]">Host: {meeting.hostName}</p>
+        {/* Title & Host */}
+        <div className="space-y-1">
+          <span className="text-[11px] font-medium text-[#86868b]">Topic</span>
+          <p className="text-sm font-medium text-[#f5f5f7]">{meeting.title}</p>
+          <p className="text-[#86868b] text-xs">Hosted by {meeting.hostName}</p>
         </div>
 
         {/* Meeting ID */}
-        <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-1">
-          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Meeting ID</span>
-          <div className="font-mono text-base font-bold text-blue-400 tracking-wider">
-            {meeting.meetingCode}
-          </div>
+        <div className="space-y-1 pt-3 border-t border-white/[0.04]">
+          <span className="text-[11px] font-medium text-[#86868b]">Meeting Code</span>
+          <p className="font-mono text-sm font-semibold text-[#f5f5f7]">{meeting.meetingCode}</p>
         </div>
 
-        {/* Passcode if present */}
+        {/* Passcode if set */}
         {meeting.settings.requirePasscode && meeting.passcode && (
-          <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-1">
-            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1">
-              <Lock className="w-3 h-3 text-amber-400" /> Passcode
-            </span>
-            <div className="font-mono text-sm font-bold text-amber-300">
-              {meeting.passcode}
-            </div>
+          <div className="space-y-1 pt-3 border-t border-white/[0.04]">
+            <span className="text-[11px] font-medium text-[#86868b]">Passcode</span>
+            <p className="font-mono text-xs text-[#f5f5f7]">{meeting.passcode}</p>
           </div>
         )}
 
-        {/* Invite Link */}
-        <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
-          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Invitation Link</span>
-          <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-300 font-mono text-[11px] break-all select-all">
+        {/* Share Link */}
+        <div className="space-y-2 pt-3 border-t border-white/[0.04]">
+          <span className="text-[11px] font-medium text-[#86868b]">Invite Link</span>
+          <div className="p-2.5 bg-black rounded-xl border border-white/[0.06] font-mono text-[11px] text-[#86868b] break-all select-all">
             {inviteUrl}
           </div>
           <button
             onClick={handleCopy}
-            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition flex items-center justify-center space-x-1.5 shadow-md shadow-blue-500/20"
+            className="w-full py-2 bg-white/[0.08] hover:bg-white/[0.14] text-[#f5f5f7] font-medium text-xs rounded-xl transition flex items-center justify-center space-x-1.5"
           >
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            <span>{copied ? 'Copied to Clipboard' : 'Copy Invitation Link'}</span>
+            {copied ? <Check className="w-3.5 h-3.5 text-[#30d158]" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? 'Copied to clipboard' : 'Copy link'}</span>
           </button>
-        </div>
-
-        {/* Encryption & Protocols */}
-        <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2 text-[11px] text-slate-400">
-          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1">
-            <Radio className="w-3 h-3 text-emerald-400" /> Security & Protocols
-          </span>
-          <p>• WebRTC (RFC 8825) Peer-to-Peer Encryption</p>
-          <p>• STUN Server: <span className="font-mono text-slate-300">stun.l.google.com:19302</span></p>
-          <p>• Department of IT - MAIT 7th Semester Project</p>
         </div>
 
       </div>

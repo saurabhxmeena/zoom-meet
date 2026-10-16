@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect } from 'react';
-import { MicOff, Pin, Crown, Shield } from 'lucide-react';
+import { MicOff, Pin } from 'lucide-react';
 
 interface VideoTileProps {
   displayName: string;
@@ -34,7 +34,6 @@ export default function VideoTile({
     }
   }, [stream]);
 
-  // Compute initials
   const initials = displayName
     .split(' ')
     .filter(Boolean)
@@ -44,15 +43,15 @@ export default function VideoTile({
 
   return (
     <div
-      className={`relative w-full h-full min-h-[220px] bg-slate-900 rounded-2xl overflow-hidden border transition-all duration-200 group flex items-center justify-center ${
+      className={`relative w-full h-full min-h-[220px] bg-[#161618] rounded-2xl overflow-hidden border transition-all duration-200 group flex items-center justify-center ${
         isSpeaking && !isAudioMuted
-          ? 'border-emerald-500 shadow-lg shadow-emerald-500/20 active-speaker-ring'
+          ? 'border-[#2997ff]/70'
           : isPinned
-          ? 'border-blue-500 ring-2 ring-blue-500/40'
-          : 'border-slate-800/80 hover:border-slate-700'
+          ? 'border-[#2997ff]/40'
+          : 'border-white/[0.06]'
       }`}
     >
-      {/* Video Stream Element */}
+      {/* Video Element */}
       <video
         ref={videoRef}
         autoPlay
@@ -63,67 +62,39 @@ export default function VideoTile({
         } ${isVideoOff || !stream ? 'hidden' : 'block'}`}
       />
 
-      {/* Video Off Placeholder Avatar */}
+      {/* Avatar when camera is off */}
       {(isVideoOff || !stream) && (
-        <div className="flex flex-col items-center justify-center space-y-3 z-10 select-none">
-          <div className="relative">
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-blue-700 via-indigo-600 to-purple-600 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white shadow-xl shadow-blue-500/20 border border-white/10">
-              {initials}
-            </div>
-
-            {/* Speaking animation around avatar */}
-            {isSpeaking && !isAudioMuted && (
-              <span className="absolute -inset-1 rounded-full border-2 border-emerald-400 animate-ping opacity-75" />
-            )}
+        <div className="flex flex-col items-center justify-center space-y-2 z-10 select-none">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#1c1c1e] border border-white/[0.08] flex items-center justify-center text-lg sm:text-xl font-medium text-[#86868b]">
+            {initials}
           </div>
-          <span className="text-xs font-medium text-slate-300 max-w-[150px] truncate">
+          <span className="text-xs text-[#86868b] max-w-[140px] truncate font-normal">
             {displayName}
           </span>
         </div>
       )}
 
-      {/* Top Left: Speaker Wave Indicator */}
-      {isSpeaking && !isAudioMuted && (
-        <div className="absolute top-3 left-3 z-20 flex items-center space-x-1 bg-black/60 backdrop-blur-md px-2 py-1 rounded-full border border-emerald-500/40">
-          <span className="w-1 h-2.5 bg-emerald-400 rounded-full wave-bar-1" />
-          <span className="w-1 h-3.5 bg-emerald-400 rounded-full wave-bar-2" />
-          <span className="w-1 h-2 bg-emerald-400 rounded-full wave-bar-3" />
-        </div>
-      )}
-
-      {/* Top Right: Pin Button */}
+      {/* Pin Button */}
       {onTogglePin && (
         <button
           onClick={onTogglePin}
-          className={`absolute top-3 right-3 z-20 p-1.5 rounded-lg backdrop-blur-md transition opacity-0 group-hover:opacity-100 ${
+          className={`absolute top-2.5 right-2.5 z-20 p-1.5 rounded-lg backdrop-blur-md transition ${
             isPinned
-              ? 'bg-blue-600 text-white opacity-100'
-              : 'bg-black/60 text-slate-300 hover:text-white hover:bg-black/80'
+              ? 'bg-white/20 text-white'
+              : 'opacity-0 group-hover:opacity-100 bg-black/40 text-[#86868b] hover:text-white'
           }`}
-          title={isPinned ? 'Unpin participant' : 'Pin participant'}
+          title={isPinned ? 'Unpin' : 'Pin'}
         >
           <Pin className="w-3.5 h-3.5" />
         </button>
       )}
 
-      {/* Bottom Name & Status Tag */}
-      <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
-        <div className="flex items-center space-x-1.5 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/5 text-xs text-white max-w-[85%] truncate">
-          {isHost && (
-            <span title="Meeting Host" className="text-amber-400">
-              <Crown className="w-3.5 h-3.5" />
-            </span>
-          )}
-          <span className="font-medium truncate">{displayName}</span>
-          {isLocal && <span className="text-slate-400 font-normal text-[11px]">(You)</span>}
-        </div>
-
-        {/* Audio Mute Icon */}
-        {isAudioMuted && (
-          <div className="p-1.5 rounded-lg bg-red-500/90 text-white shadow-md">
-            <MicOff className="w-3.5 h-3.5" />
-          </div>
-        )}
+      {/* Bottom Identity Pill */}
+      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center space-x-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/[0.06] text-xs text-[#f5f5f7] pointer-events-none max-w-[85%]">
+        <span className="font-normal truncate">{displayName}</span>
+        {isLocal && <span className="text-[#86868b] text-[11px]">(You)</span>}
+        {isHost && <span className="text-[#86868b] text-[11px]">• Host</span>}
+        {isAudioMuted && <MicOff className="w-3 h-3 text-[#ff453a] ml-1 shrink-0" />}
       </div>
     </div>
   );

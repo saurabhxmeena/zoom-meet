@@ -1,21 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import confetti from 'canvas-confetti';
 import {
-  Users,
   Grid,
   Maximize2,
-  Minimize2,
-  Radio,
-  Clock,
-  Sparkles,
-  ShieldCheck,
-  AlertTriangle,
   MonitorUp,
+  AlertCircle,
 } from 'lucide-react';
-import { IMeeting, IMessage, IPeerConnection, IReaction } from '@/lib/types';
+import { IMeeting, IMessage, IPeerConnection } from '@/lib/types';
 import { createAudioAnalyser, ICE_SERVERS } from '@/lib/webrtc';
 import VideoTile from './VideoTile';
 import MeetingControls from './MeetingControls';
@@ -62,26 +55,22 @@ export default function MeetingRoom({
   const [pinnedPeerId, setPinnedPeerId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('none');
 
-  // Chat & Reactions
+  // Chat
   const [messages, setMessages] = useState<IMessage[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [reactions, setReactions] = useState<IReaction[]>([]);
 
   // Meeting duration timer
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [meetingEndedNotice, setMeetingEndedNotice] = useState<string | null>(null);
 
-  // Sound analyzer cleanup
   const audioCleanupRef = useRef<(() => void) | null>(null);
 
-  // Format timer
   const formatDuration = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // 1. Duration Timer
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
@@ -89,14 +78,11 @@ export default function MeetingRoom({
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Local Media Setup & Speaking Analyser
   useEffect(() => {
     if (localStream) {
-      // Set audio muted initial state
       localStream.getAudioTracks().forEach((track) => {
         track.enabled = !initialAudioMuted;
       });
-      // Set video off initial state
       localStream.getVideoTracks().forEach((track) => {
         track.enabled = !initialVideoOff;
       });
@@ -112,7 +98,6 @@ export default function MeetingRoom({
     };
   }, [localStream, initialAudioMuted, initialVideoOff]);
 
-  // 3. WebRTC PeerJS Mesh Setup
   useEffect(() => {
     let peer: any = null;
     let isSubscribed = true;
@@ -120,7 +105,7 @@ export default function MeetingRoom({
     async function initWebRTC() {
       try {
         const PeerClass = (await import('peerjs')).default;
-        const myPeerId = `zoom_${meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '')}_${userId.slice(-6)}`;
+        const myPeerId = `meet_${meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '')}_${userId.slice(-6)}`;
 
         peer = new PeerClass(myPeerId, {
           config: {
@@ -132,9 +117,6 @@ export default function MeetingRoom({
         peerInstanceRef.current = peer;
 
         peer.on('open', (id: string) => {
-          console.log('[WebRTC] Peer connected with ID:', id);
-
-          // Broadcast peer arrival via signaling channel
           fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -146,9 +128,7 @@ export default function MeetingRoom({
           }).catch(console.warn);
         });
 
-        // Answer incoming calls from other participants
         peer.on('call', (call: any) => {
-          console.log('[WebRTC] Receiving call from:', call.peer);
           call.answer(localStream || undefined);
 
           call.on('stream', (remoteStream: MediaStream) => {
@@ -173,7 +153,7 @@ export default function MeetingRoom({
         });
 
         peer.on('error', (err: any) => {
-          console.warn('[WebRTC Peer Warning]:', err.type || err);
+          console.warn('[WebRTC]:', err.type || err);
         });
       } catch (err) {
         console.error('Failed to initialize WebRTC Peer:', err);
@@ -195,7 +175,6 @@ export default function MeetingRoom({
     };
   }, [meeting.meetingCode, userId, displayName, localStream]);
 
-  // 4. Signaling & Polling Relay (Fallback mesh sync & meeting status check)
   useEffect(() => {
     let lastSignalTime = Date.now();
     let isAlive = true;
@@ -203,7 +182,6 @@ export default function MeetingRoom({
     const syncMeeting = async () => {
       if (!isAlive) return;
       try {
-        // Poll for meeting status & signaling
         const myPeerId = peerInstanceRef.current?.id;
         const res = await fetch(
           `/api/meetings/${meeting.meetingCode}/signal?peerId=${myPeerId || ''}&since=${lastSignalTime}`
@@ -212,13 +190,10 @@ export default function MeetingRoom({
           const data = await res.json();
           lastSignalTime = data.serverTime || Date.now();
 
-          // Process incoming signals
           if (data.signals && data.signals.length > 0) {
             for (const sig of data.signals) {
               if (sig.type === 'peer-joined' && sig.from !== myPeerId) {
-                // Call this peer if not already connected
                 if (peerInstanceRef.current && localStream && !activeCallsRef.current.has(sig.from)) {
-                  console.log('[WebRTC] Initiating call to new peer:', sig.from);
                   const call = peerInstanceRef.current.call(sig.from, localStream, {
                     metadata: { userId, displayName },
                   });
@@ -241,16 +216,13 @@ export default function MeetingRoom({
                     activeCallsRef.current.set(sig.from, call);
                   }
                 }
-              } else if (sig.type === 'reaction') {
-                triggerFloatingReaction(sig.payload.emoji, sig.payload.senderName);
               } else if (sig.type === 'meeting-ended') {
-                setMeetingEndedNotice('The host has ended this meeting for all participants.');
+                setMeetingEndedNotice('The meeting was ended by the host.');
               }
             }
           }
         }
 
-        // Poll chat messages
         const chatRes = await fetch(`/api/meetings/${meeting.meetingCode}/messages`);
         if (chatRes.ok) {
           const chatData = await chatRes.json();
@@ -267,12 +239,11 @@ export default function MeetingRoom({
           }
         }
 
-        // Check meeting status (FR-07 check)
         const meetRes = await fetch(`/api/meetings/${meeting.meetingCode}`);
         if (meetRes.ok) {
           const meetData = await meetRes.json();
           if (meetData.meeting && meetData.meeting.status === 'ended') {
-            setMeetingEndedNotice('This meeting was concluded by the host.');
+            setMeetingEndedNotice('This meeting has ended.');
           }
         }
       } catch (err) {
@@ -287,44 +258,6 @@ export default function MeetingRoom({
     };
   }, [meeting.meetingCode, userId, displayName, localStream, activePanel]);
 
-  // Trigger floating emoji reaction
-  const triggerFloatingReaction = useCallback((emoji: string, sender: string) => {
-    const reaction: IReaction = {
-      id: Math.random().toString(36).substring(2, 9),
-      emoji,
-      senderName: sender,
-      createdAt: Date.now(),
-    };
-
-    setReactions((prev) => [...prev, reaction]);
-    setTimeout(() => {
-      setReactions((prev) => prev.filter((r) => r.id !== reaction.id));
-    }, 2800);
-
-    if (emoji === '🎉') {
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.8 },
-      });
-    }
-  }, []);
-
-  // Send Reaction
-  const handleSendReaction = async (emoji: string) => {
-    triggerFloatingReaction(emoji, displayName);
-    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: userId,
-        type: 'reaction',
-        payload: { emoji, senderName: displayName },
-      }),
-    }).catch(console.warn);
-  };
-
-  // Toggle Microphone
   const handleToggleAudio = () => {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0];
@@ -337,7 +270,6 @@ export default function MeetingRoom({
     }
   };
 
-  // Toggle Camera Video
   const handleToggleVideo = () => {
     if (localStream) {
       const videoTrack = localStream.getVideoTracks()[0];
@@ -350,10 +282,8 @@ export default function MeetingRoom({
     }
   };
 
-  // Toggle Screen Sharing
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
-      // Revert to camera video
       if (screenTrackRef.current) {
         screenTrackRef.current.stop();
       }
@@ -376,7 +306,6 @@ export default function MeetingRoom({
         const screenTrack = screenStream.getVideoTracks()[0];
         screenTrackRef.current = screenTrack;
 
-        // Replace track in peer connections
         activeCallsRef.current.forEach((call) => {
           const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
           if (sender) {
@@ -404,7 +333,6 @@ export default function MeetingRoom({
     }
   };
 
-  // Send Chat Message
   const handleSendMessage = async (text: string) => {
     try {
       const res = await fetch(`/api/meetings/${meeting.meetingCode}/messages`, {
@@ -426,16 +354,13 @@ export default function MeetingRoom({
     }
   };
 
-  // Leave Meeting (FR-06)
   const handleLeaveMeeting = async () => {
-    // Release client-side media tracks
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
     }
     if (screenTrackRef.current) {
       screenTrackRef.current.stop();
     }
-    // Record departure in DB
     fetch(`/api/meetings/${meeting.meetingCode}/join?userId=${userId}`, {
       method: 'DELETE',
     }).catch(console.warn);
@@ -443,7 +368,6 @@ export default function MeetingRoom({
     router.push('/');
   };
 
-  // End Meeting for All (FR-07: Host only)
   const handleEndMeetingForAll = async () => {
     try {
       await fetch(`/api/meetings/${meeting.meetingCode}`, {
@@ -455,7 +379,6 @@ export default function MeetingRoom({
         }),
       });
 
-      // Broadcast meeting-ended signal
       fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -473,7 +396,6 @@ export default function MeetingRoom({
     }
   };
 
-  // Host Moderation: Mute Participant
   const handleMuteParticipant = (peerId: string) => {
     setPeers((prev) => {
       const updated = new Map(prev);
@@ -485,7 +407,6 @@ export default function MeetingRoom({
     });
   };
 
-  // Host Moderation: Kick Participant
   const handleKickParticipant = (peerId: string) => {
     const call = activeCallsRef.current.get(peerId);
     if (call) {
@@ -502,7 +423,6 @@ export default function MeetingRoom({
   const remotePeersList = Array.from(peers.values());
   const totalParticipantCount = 1 + remotePeersList.length;
 
-  // Compute Grid layout classes dynamically based on participant count
   const getGridClass = () => {
     if (pinnedPeerId) return 'grid-cols-1';
     if (totalParticipantCount === 1) return 'grid-cols-1 max-w-4xl mx-auto';
@@ -513,73 +433,56 @@ export default function MeetingRoom({
   };
 
   return (
-    <div className="relative w-screen h-screen bg-[#070b12] text-white flex flex-col overflow-hidden select-none">
+    <div className="relative w-screen h-screen bg-black text-[#f5f5f7] flex flex-col overflow-hidden select-none">
       
-      {/* Top Header Bar */}
-      <header className="h-14 px-4 sm:px-6 flex items-center justify-between border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md z-20">
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <h2 className="text-xs sm:text-sm font-bold text-white max-w-[200px] sm:max-w-[320px] truncate">
-              {meeting.title}
-            </h2>
-          </div>
-          <span className="hidden sm:inline font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-blue-400 border border-slate-700">
-            {meeting.meetingCode}
-          </span>
+      {/* Apple-style Top Header Bar */}
+      <header className="h-12 px-4 sm:px-6 flex items-center justify-between border-b border-white/[0.06] bg-black/40 backdrop-blur-xl z-20">
+        <div className="flex items-center space-x-2.5">
+          <span className="w-2 h-2 rounded-full bg-[#30d158]" />
+          <h2 className="text-xs sm:text-sm font-medium text-[#f5f5f7] max-w-[200px] sm:max-w-[360px] truncate">
+            {meeting.title}
+          </h2>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Duration Clock */}
-          <div className="flex items-center space-x-1.5 text-xs text-slate-300 font-mono bg-slate-900/90 px-2.5 py-1 rounded-full border border-slate-800">
-            <Clock className="w-3.5 h-3.5 text-blue-400" />
-            <span>{formatDuration(elapsedSeconds)}</span>
-          </div>
+        <div className="flex items-center space-x-4">
+          <span className="text-xs font-mono text-[#86868b]">
+            {formatDuration(elapsedSeconds)}
+          </span>
 
-          {/* WebRTC P2P Status Pill */}
-          <div className="hidden md:flex items-center space-x-1.5 text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-            <Radio className="w-3 h-3" />
-            <span>WebRTC P2P Mesh</span>
-          </div>
-
-          {/* View Toggle */}
           <button
             onClick={() => {
               setViewMode(viewMode === 'gallery' ? 'speaker' : 'gallery');
               setPinnedPeerId(null);
             }}
-            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
-            title={viewMode === 'gallery' ? 'Switch to Speaker View' : 'Switch to Gallery View'}
+            className="p-1.5 text-[#86868b] hover:text-[#f5f5f7] hover:bg-white/[0.06] rounded-md transition"
+            title={viewMode === 'gallery' ? 'Speaker view' : 'Gallery view'}
           >
-            {viewMode === 'gallery' ? <Grid className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {viewMode === 'gallery' ? <Grid className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
         </div>
       </header>
 
-      {/* Screen Sharing Notification Banner */}
+      {/* Screen Share Notice */}
       {isScreenSharing && (
-        <div className="bg-emerald-600 px-4 py-1.5 flex items-center justify-between text-xs text-white z-20">
+        <div className="bg-[#2997ff] px-4 py-1.5 flex items-center justify-between text-xs text-white z-20">
           <div className="flex items-center space-x-2">
-            <MonitorUp className="w-4 h-4 animate-bounce" />
-            <span>You are sharing your screen with all participants</span>
+            <MonitorUp className="w-3.5 h-3.5" />
+            <span>You are sharing your screen</span>
           </div>
           <button
             onClick={handleToggleScreenShare}
-            className="px-2.5 py-0.5 bg-white text-emerald-700 font-bold rounded hover:bg-slate-100 transition text-[11px]"
+            className="px-2 py-0.5 bg-white text-[#0077ed] font-medium rounded text-[11px] hover:bg-white/90 transition"
           >
-            Stop Sharing
+            Stop
           </button>
         </div>
       )}
 
-      {/* Center Video Area + Side Panels */}
+      {/* Main Video Stage */}
       <div className="flex-1 flex overflow-hidden relative">
-        
-        {/* Main Video Grid */}
-        <main className="flex-1 p-3 sm:p-4 overflow-y-auto pb-24 flex items-center justify-center">
-          <div className={`w-full h-full max-h-[82vh] grid gap-3 sm:gap-4 ${getGridClass()}`}>
+        <main className="flex-1 p-3 sm:p-5 overflow-y-auto pb-24 flex items-center justify-center">
+          <div className={`w-full h-full max-h-[84vh] grid gap-3 sm:gap-4 ${getGridClass()}`}>
             
-            {/* Local User Tile */}
             <VideoTile
               displayName={displayName}
               stream={localStream}
@@ -592,7 +495,6 @@ export default function MeetingRoom({
               onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
             />
 
-            {/* Remote Peer Video Tiles */}
             {remotePeersList.map((peer) => (
               <VideoTile
                 key={peer.peerId}
@@ -610,20 +512,6 @@ export default function MeetingRoom({
           </div>
         </main>
 
-        {/* Floating Emoji Reactions Stream */}
-        <div className="absolute bottom-24 left-10 pointer-events-none z-30 flex flex-col space-y-2">
-          {reactions.map((r) => (
-            <div
-              key={r.id}
-              className="floating-reaction flex items-center space-x-2 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700 shadow-xl"
-            >
-              <span className="text-2xl">{r.emoji}</span>
-              <span className="text-[11px] font-medium text-slate-300">{r.senderName}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Side Panels */}
         {activePanel === 'chat' && (
           <ChatPanel
             messages={messages}
@@ -659,10 +547,9 @@ export default function MeetingRoom({
             onClose={() => setActivePanel('none')}
           />
         )}
-
       </div>
 
-      {/* Bottom Floating Control Bar */}
+      {/* Floating Bottom Control Bar */}
       <MeetingControls
         isAudioMuted={isAudioMuted}
         isVideoOff={isVideoOff}
@@ -678,28 +565,24 @@ export default function MeetingRoom({
           setActivePanel(activePanel === panel ? 'none' : panel);
           if (panel === 'chat') setUnreadCount(0);
         }}
-        onSendReaction={handleSendReaction}
         onLeaveMeeting={handleLeaveMeeting}
         onEndMeetingForAll={isHost ? handleEndMeetingForAll : undefined}
       />
 
-      {/* Meeting Concluded Notice Modal */}
+      {/* Meeting Concluded Modal */}
       {meetingEndedNotice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
-            <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 mx-auto flex items-center justify-center border border-red-500/20">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-white">Meeting Ended</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">{meetingEndedNotice}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+          <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+            <h3 className="text-sm font-semibold text-[#f5f5f7]">Meeting Ended</h3>
+            <p className="text-xs text-[#86868b] leading-relaxed">{meetingEndedNotice}</p>
             <button
               onClick={() => {
                 if (localStream) localStream.getTracks().forEach((t) => t.stop());
                 router.push('/');
               }}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-blue-500/20 transition"
+              className="w-full py-2.5 bg-[#2997ff] hover:bg-[#0077ed] text-white text-xs font-medium rounded-xl transition"
             >
-              Return to Home
+              Return Home
             </button>
           </div>
         </div>
