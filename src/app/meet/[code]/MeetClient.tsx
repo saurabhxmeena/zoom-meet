@@ -110,6 +110,36 @@ export default function MeetClient({ code }: MeetClientProps) {
     }
   };
 
+  // Clean up any remaining active media tracks when MeetClient unmounts
+  useEffect(() => {
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            // ignore
+          }
+        });
+      }
+    };
+  }, [activeStream]);
+
+  const handleRoomLeave = () => {
+    if (activeStream) {
+      activeStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // ignore
+        }
+      });
+      setActiveStream(null);
+    }
+    setJoined(false);
+    router.push('/');
+  };
+
   if (loading && !joined) {
     return (
       <div className="min-h-screen bg-[#0e1015] flex flex-col items-center justify-center space-y-4 text-[#f8fafc]">
@@ -161,6 +191,7 @@ export default function MeetClient({ code }: MeetClientProps) {
         initialStream={activeStream}
         initialAudioMuted={isAudioMuted}
         initialVideoOff={isVideoOff}
+        onLeave={handleRoomLeave}
       />
     );
   }

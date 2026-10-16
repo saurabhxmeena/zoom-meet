@@ -71,12 +71,26 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
       }
     }
 
-    initMedia();
+    const handleBeforeUnload = () => {
+      if (!hasJoinedRef.current) {
+        localStream?.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (audioCleanupRef.current) audioCleanupRef.current();
-      if (localStream && !hasJoinedRef.current) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (!hasJoinedRef.current) {
+        localStream?.getTracks().forEach((track) => {
+          try { track.stop(); } catch {}
+        });
+        if (videoRef.current) {
+          videoRef.current.pause();
+          videoRef.current.srcObject = null;
+        }
       }
     };
   }, []);

@@ -12,6 +12,7 @@ import {
   PhoneOff,
   Volume2,
   X as CloseIcon,
+  ExternalLink,
 } from 'lucide-react';
 import { IMeeting, IMessage, IPeerConnection } from '@/lib/types';
 import { createAudioAnalyser, ICE_SERVERS } from '@/lib/webrtc';
@@ -29,6 +30,7 @@ interface MeetingRoomProps {
   initialStream: MediaStream | null;
   initialAudioMuted: boolean;
   initialVideoOff: boolean;
+  onLeave?: () => void;
 }
 
 interface FloatingReaction {
@@ -45,6 +47,7 @@ export default function MeetingRoom({
   initialStream,
   initialAudioMuted,
   initialVideoOff,
+  onLeave,
 }: MeetingRoomProps) {
   const router = useRouter();
 
@@ -54,9 +57,13 @@ export default function MeetingRoom({
   const [isVideoOff, setIsVideoOff] = useState(initialVideoOff);
   const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
 
-  // Screen sharing state
+  // Master tracking of all created tracks to guarantee 100% camera/mic release on exit
+  const allMediaTracksRef = useRef<Set<MediaStreamTrack>>(new Set());
+
+  // Screen sharing & Picture-in-Picture state
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [isPipActive, setIsPipActive] = useState(false);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const localScreenVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteScreenVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -66,10 +73,12 @@ export default function MeetingRoom({
   const peerInstanceRef = useRef<any>(null);
   const activeCallsRef = useRef<Map<string, any>>(new Map());
 
-  // Meeting view state
+  // Meeting view state (gallery vs speaker)
   const [viewMode, setViewMode] = useState<'gallery' | 'speaker'>('gallery');
   const [pinnedPeerId, setPinnedPeerId] = useState<string | null>(null);
-  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('none');
+
+  // Side panels - PARTICIPANTS PANEL OPEN BY DEFAULT as requested
+  const [activePanel, setActivePanel] = useState<'none' | 'chat' | 'participants' | 'info'>('participants');
 
   // Meeting reactions & Hand raise state
   const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
@@ -87,6 +96,81 @@ export default function MeetingRoom({
   const [copiedCode, setCopiedCode] = useState(false);
 
   const audioCleanupRef = useRef<(() => void) | null>(null);
+
+  // Track initial stream tracks immediately
+  useEffect(() => {
+    if (initialStream) {
+      initialStream.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
+    }
+  }, [initialStream]);
+
+  // Track local stream tracks
+  useEffect(() => {
+    if (localStream) {
+      localStream.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
+    }
+  }, [localStream]);
+
+  // Master function to stop and release all media hardware tracks
+  const stopAllMediaTracks = useCallback(() => {
+    allMediaTracksRef.current.forEach((track) => {
+      try {
+        track.stop();
+      } catch {
+        // ignore
+      }
+    });
+    allMediaTracksRef.current.clear();
+
+    if (localStream) {
+      localStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+    }
+    if (initialStream) {
+      initialStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+    }
+    if (screenStream) {
+      screenStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+    }
+    if (screenTrackRef.current) {
+      try { screenTrackRef.current.stop(); } catch {}
+      screenTrackRef.current = null;
+    }
+
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    }
+
+    if (localScreenVideoRef.current) {
+      localScreenVideoRef.current.pause();
+      localScreenVideoRef.current.srcObject = null;
+    }
+    if (remoteScreenVideoRef.current) {
+      remoteScreenVideoRef.current.pause();
+      remoteScreenVideoRef.current.srcObject = null;
+    }
+  }, [localStream, initialStream, screenStream]);
+
+  // Guarantee cleanup on window unload or page hide (e.g. tab close, navigation)
+  useEffect(() => {
+    const handleUnload = () => {
+      stopAllMediaTracks();
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+      stopAllMediaTracks();
+    };
+  }, [stopAllMediaTracks]);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(`${window.location.origin}/meet/${meeting.meetingCode}`);
@@ -133,6 +217,8 @@ export default function MeetingRoom({
               autoGainControl: true,
             },
           });
+
+          fresh.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
 
           if (!cancelled) {
             fresh.getAudioTracks().forEach((t) => {
@@ -195,6 +281,38 @@ export default function MeetingRoom({
     }
   }, [screenStream]);
 
+  // Picture-in-Picture event listeners
+  useEffect(() => {
+    const videoEl = localScreenVideoRef.current;
+    if (!videoEl) return;
+
+    const handleEnterPiP = () => setIsPipActive(true);
+    const handleLeavePiP = () => setIsPipActive(false);
+
+    videoEl.addEventListener('enterpictureinpicture', handleEnterPiP);
+    videoEl.addEventListener('leavepictureinpicture', handleLeavePiP);
+
+    return () => {
+      videoEl.removeEventListener('enterpictureinpicture', handleEnterPiP);
+      videoEl.removeEventListener('leavepictureinpicture', handleLeavePiP);
+    };
+  }, [screenStream]);
+
+  // Toggle Picture-in-Picture floating preview window
+  const handleTogglePictureInPicture = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPipActive(false);
+      } else if (localScreenVideoRef.current) {
+        await localScreenVideoRef.current.requestPictureInPicture();
+        setIsPipActive(true);
+      }
+    } catch (err) {
+      console.warn('[PiP] Picture-in-Picture failed or denied:', err);
+    }
+  };
+
   // Send real-time media state signal to all peers
   const sendMediaStateSignal = useCallback(
     (videoOff: boolean, audioMuted: boolean, screenSharing: boolean) => {
@@ -230,7 +348,6 @@ export default function MeetingRoom({
         const PeerClass = (await import('peerjs')).default;
         const myPeerId = `meet_${meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '')}_${userId.slice(-6)}`;
 
-        // Fetch configured ICE servers (STUN & optional TURN)
         let resolvedIceServers = ICE_SERVERS;
         try {
           const iceRes = await fetch('/api/webrtc/ice-servers');
@@ -241,7 +358,7 @@ export default function MeetingRoom({
             }
           }
         } catch {
-          // fallback to public Google STUN
+          // fallback to Google STUN
         }
 
         peer = new PeerClass(myPeerId, {
@@ -266,9 +383,7 @@ export default function MeetingRoom({
           }).catch(console.warn);
         });
 
-        // Answer incoming calls from other participants
         peer.on('call', (call: any) => {
-          // Prevent duplicate concurrent calls from the same peer (root cause of audio echo)
           const existingCall = activeCallsRef.current.get(call.peer);
           if (existingCall && existingCall.open) {
             console.debug('[WebRTC] Redundant call from existing peer ignored:', call.peer);
@@ -336,8 +451,9 @@ export default function MeetingRoom({
         }
       });
       activeCallsRef.current.clear();
+      stopAllMediaTracks();
     };
-  }, [meeting.meetingCode, userId, displayName]);
+  }, [meeting.meetingCode, userId, displayName, stopAllMediaTracks]);
 
   // Signaling & Presence Sync Poll
   useEffect(() => {
@@ -360,9 +476,7 @@ export default function MeetingRoom({
             for (const sig of data.signals) {
               if (sig.from === myPeerId) continue;
 
-              // 1. Peer joined -> Deterministic call initiation:
-              // Only initiate call if myPeerId < sig.from lexicographically.
-              // This strictly prevents TWO simultaneous calls between the same two devices!
+              // 1. Peer joined -> Deterministic call initiation
               if (sig.type === 'peer-joined') {
                 const shouldInitiate = myPeerId && myPeerId.localeCompare(sig.from) < 0;
 
@@ -403,7 +517,7 @@ export default function MeetingRoom({
                 }
               }
 
-              // 2. Peer updated media state (mute, camera, screen share)
+              // 2. Peer updated media state
               else if (sig.type === 'peer-media-state') {
                 setPeers((prev) => {
                   const updated = new Map(prev);
@@ -492,7 +606,7 @@ export default function MeetingRoom({
           }
         }
 
-        // Periodic database message synchronization with ID-based deduplication
+        // Periodic database message synchronization with ID deduplication
         const chatRes = await fetch(`/api/meetings/${meeting.meetingCode}/messages`);
         if (chatRes.ok) {
           const chatData = await chatRes.json();
@@ -535,7 +649,6 @@ export default function MeetingRoom({
   const handleToggleAudio = async () => {
     let currentAudioTrack = localStream?.getAudioTracks()[0];
 
-    // If audio track is missing or ended, acquire a fresh track with echo cancellation
     if (!currentAudioTrack || currentAudioTrack.readyState === 'ended') {
       try {
         const fresh = await navigator.mediaDevices.getUserMedia({
@@ -546,6 +659,8 @@ export default function MeetingRoom({
           },
         });
         const freshTrack = fresh.getAudioTracks()[0];
+        allMediaTracksRef.current.add(freshTrack);
+
         if (localStream) {
           localStream.addTrack(freshTrack);
         } else {
@@ -575,13 +690,14 @@ export default function MeetingRoom({
   const handleToggleVideo = async () => {
     let currentVideoTrack = localStream?.getVideoTracks()[0];
 
-    // If video track is missing or ended, acquire a fresh camera track
     if (!currentVideoTrack || currentVideoTrack.readyState === 'ended') {
       try {
         const fresh = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         });
         const freshTrack = fresh.getVideoTracks()[0];
+        allMediaTracksRef.current.add(freshTrack);
+
         if (localStream) {
           localStream.addTrack(freshTrack);
         } else {
@@ -611,6 +727,11 @@ export default function MeetingRoom({
 
   // Stop Screen Share helper
   const stopScreenShare = useCallback(() => {
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    }
+    setIsPipActive(false);
+
     if (screenTrackRef.current) {
       try {
         screenTrackRef.current.stop();
@@ -633,7 +754,6 @@ export default function MeetingRoom({
 
     setIsScreenSharing(false);
 
-    // Restore camera video track on peer senders
     const camVideoTrack = localStream?.getVideoTracks()[0];
     activeCallsRef.current.forEach((call) => {
       const sender = call.peerConnection?.getSenders()?.find((s: any) => s.track?.kind === 'video');
@@ -659,6 +779,7 @@ export default function MeetingRoom({
         const screenTrack = displayStream.getVideoTracks()[0];
         if (!screenTrack) return;
 
+        displayStream.getTracks().forEach((t) => allMediaTracksRef.current.add(t));
         screenTrackRef.current = screenTrack;
         setScreenStream(displayStream);
         setIsScreenSharing(true);
@@ -683,7 +804,7 @@ export default function MeetingRoom({
     }
   };
 
-  // Send Chat Message with immediate signal broadcast & persistence
+  // Send Chat Message
   const handleSendMessage = async (text: string) => {
     try {
       const res = await fetch(`/api/meetings/${meeting.meetingCode}/messages`, {
@@ -700,13 +821,11 @@ export default function MeetingRoom({
         const data = await res.json();
         const savedMessage: IMessage = data.message;
 
-        // 1. Add locally
         setMessages((prev) => {
           if (prev.some((m) => m._id === savedMessage._id)) return prev;
           return [...prev, savedMessage];
         });
 
-        // 2. Broadcast immediately via signaling for real-time delivery
         const myPeerId = peerInstanceRef.current?.id;
         if (myPeerId) {
           fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
@@ -725,7 +844,7 @@ export default function MeetingRoom({
     }
   };
 
-  // Send Meeting Reaction (Emoji)
+  // Send Meeting Reaction
   const handleSendReaction = (emoji: string) => {
     const newReaction: FloatingReaction = {
       id: Math.random().toString(36).substring(2, 9),
@@ -771,6 +890,7 @@ export default function MeetingRoom({
     }
   };
 
+  // Complete Leave and Hardware Media Release
   const handleLeaveMeeting = async () => {
     const myPeerId = peerInstanceRef.current?.id;
     if (myPeerId) {
@@ -785,15 +905,8 @@ export default function MeetingRoom({
       }).catch(console.warn);
     }
 
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-    }
-    if (screenTrackRef.current) {
-      screenTrackRef.current.stop();
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach((track) => track.stop());
-    }
+    // Completely stop every media track so camera and mic indicators shut off
+    stopAllMediaTracks();
 
     if (peerInstanceRef.current) {
       try {
@@ -807,7 +920,11 @@ export default function MeetingRoom({
       method: 'DELETE',
     }).catch(console.warn);
 
-    router.push('/');
+    if (onLeave) {
+      onLeave();
+    } else {
+      router.push('/');
+    }
   };
 
   const handleEndMeetingForAll = async () => {
@@ -882,19 +999,35 @@ export default function MeetingRoom({
     }
   }, [activeSharerPeer?.stream]);
 
+  // Gallery view dynamic grid sizing
   const getGridClass = () => {
-    if (pinnedPeerId) return 'grid-cols-1 max-w-5xl mx-auto';
-    if (totalParticipantCount === 1) return 'grid-cols-1 max-w-5xl mx-auto';
+    if (totalParticipantCount === 1) return 'grid-cols-1 max-w-4xl mx-auto';
     if (totalParticipantCount === 2) return 'grid-cols-1 md:grid-cols-2 max-w-6xl mx-auto';
-    if (totalParticipantCount <= 4) return 'grid-cols-1 sm:grid-cols-2 max-w-6xl mx-auto';
+    if (totalParticipantCount <= 4) return 'grid-cols-2 max-w-6xl mx-auto';
     if (totalParticipantCount <= 6) return 'grid-cols-2 md:grid-cols-3 max-w-7xl mx-auto';
     return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 max-w-7xl mx-auto';
   };
 
+  // Determine Active Speaker in Speaker View
+  const getSpotlightParticipant = () => {
+    if (pinnedPeerId === 'local') return { isLocal: true };
+    if (pinnedPeerId) {
+      const pinnedPeer = remotePeersList.find((p) => p.peerId === pinnedPeerId);
+      if (pinnedPeer) return { isLocal: false, peer: pinnedPeer };
+    }
+    const speakingRemote = remotePeersList.find((p) => p.isSpeaking && !p.isAudioMuted);
+    if (speakingRemote) return { isLocal: false, peer: speakingRemote };
+    if (isLocalSpeaking && !isAudioMuted) return { isLocal: true };
+    if (remotePeersList.length > 0) return { isLocal: false, peer: remotePeersList[0] };
+    return { isLocal: true };
+  };
+
+  const spotlight = getSpotlightParticipant();
+
   return (
     <div className="relative w-screen h-screen bg-[#0e1015] text-[#f8fafc] flex flex-col overflow-hidden select-none">
       {/* Top Header Bar */}
-      <header className="h-14 px-4 sm:px-6 flex items-center justify-between border-b border-[#242732] bg-[#16181f] z-20">
+      <header className="h-14 px-4 sm:px-6 flex items-center justify-between border-b border-[#242732] bg-[#16181f] z-20 shrink-0">
         <div className="flex items-center space-x-3 min-w-0">
           <div className="flex items-center space-x-2 px-2.5 py-1 rounded-md bg-[#1e212b] border border-[#242732] text-xs font-medium text-slate-300 shrink-0">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -915,28 +1048,39 @@ export default function MeetingRoom({
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
           <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-[#1e212b] border border-[#242732] text-xs font-mono text-slate-400">
             <Clock className="w-3.5 h-3.5 text-slate-400" />
             <span>{formatDuration(elapsedSeconds)}</span>
           </div>
 
+          {/* GALLERY / SPEAKER VIEW TOGGLE */}
           <button
             onClick={() => {
-              setViewMode(viewMode === 'gallery' ? 'speaker' : 'gallery');
+              setViewMode((prev) => (prev === 'gallery' ? 'speaker' : 'gallery'));
               setPinnedPeerId(null);
             }}
-            className="p-2 text-slate-400 hover:text-white hover:bg-[#1e212b] rounded-lg border border-[#242732] transition"
-            title={viewMode === 'gallery' ? 'Switch to Speaker view' : 'Switch to Gallery view'}
+            className="flex items-center space-x-1.5 px-2.5 py-1 text-slate-300 hover:text-white hover:bg-[#1e212b] rounded-lg border border-[#242732] text-xs font-medium transition"
+            title={viewMode === 'gallery' ? 'Switch to Speaker View' : 'Switch to Gallery View'}
           >
-            {viewMode === 'gallery' ? <Grid className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {viewMode === 'gallery' ? (
+              <>
+                <Maximize2 className="w-3.5 h-3.5 text-blue-400" />
+                <span className="hidden sm:inline">Speaker View</span>
+              </>
+            ) : (
+              <>
+                <Grid className="w-3.5 h-3.5 text-blue-400" />
+                <span className="hidden sm:inline">Gallery View</span>
+              </>
+            )}
           </button>
         </div>
       </header>
 
-      {/* Unobtrusive acoustic feedback hint for multi-device testing */}
+      {/* Unobtrusive acoustic feedback hint */}
       {showAcousticHint && totalParticipantCount > 1 && (
-        <div className="bg-[#16181f] border-b border-[#242732] px-4 py-1.5 flex items-center justify-between text-[11px] text-slate-400 z-20">
+        <div className="bg-[#16181f] border-b border-[#242732] px-4 py-1.5 flex items-center justify-between text-[11px] text-slate-400 z-20 shrink-0">
           <div className="flex items-center space-x-2">
             <Volume2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <span>
@@ -974,7 +1118,7 @@ export default function MeetingRoom({
             </div>
           )}
 
-          {/* SCREEN SHARING HERO VIEW */}
+          {/* 1. SCREEN SHARING HERO VIEW WITH PICTURE-IN-PICTURE CONTROL */}
           {isAnyoneScreenSharing ? (
             <div className="w-full h-full max-w-7xl flex flex-col space-y-3">
               {/* Screen Share Stage */}
@@ -988,7 +1132,6 @@ export default function MeetingRoom({
                     className="w-full h-full object-contain"
                   />
                 ) : (
-                  // Muted on remote screen video: remote audio is played cleanly by the participant's VideoTile
                   <video
                     ref={remoteScreenVideoRef}
                     autoPlay
@@ -998,12 +1141,30 @@ export default function MeetingRoom({
                   />
                 )}
 
-                {/* Presenter Pill */}
-                <div className="absolute top-3 left-3 bg-[#16181f]/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#242732] flex items-center space-x-2 text-xs text-white z-10 shadow">
-                  <MonitorUp className="w-3.5 h-3.5 text-[#3b82f6]" />
-                  <span className="font-medium">
-                    {isScreenSharing ? 'You are sharing your screen' : `${activeSharerPeer?.displayName || 'Participant'} is presenting`}
-                  </span>
+                {/* Presenter Pill & PiP Action */}
+                <div className="absolute top-3 left-3 flex items-center space-x-2 z-10">
+                  <div className="bg-[#16181f]/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#242732] flex items-center space-x-2 text-xs text-white shadow">
+                    <MonitorUp className="w-3.5 h-3.5 text-[#3b82f6]" />
+                    <span className="font-medium">
+                      {isScreenSharing ? 'You are sharing your screen' : `${activeSharerPeer?.displayName || 'Participant'} is presenting`}
+                    </span>
+                  </div>
+
+                  {/* Persistent Floating Picture-in-Picture Preview Button */}
+                  {isScreenSharing && (
+                    <button
+                      onClick={handleTogglePictureInPicture}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition active:scale-95 shadow ${
+                        isPipActive
+                          ? 'bg-[#2563eb] text-white'
+                          : 'bg-[#16181f]/90 hover:bg-[#20232c] text-slate-200 border border-[#242732]'
+                      }`}
+                      title={isPipActive ? 'Close floating preview' : 'Open persistent floating preview window'}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{isPipActive ? 'Floating Active' : 'Floating Preview'}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Sharer Stop Button */}
@@ -1019,7 +1180,6 @@ export default function MeetingRoom({
 
               {/* Participant Filmstrip */}
               <div className="h-32 sm:h-36 flex items-center space-x-3 overflow-x-auto pb-1 shrink-0">
-                {/* Local Camera Tile in Filmstrip */}
                 <div className="w-48 sm:w-56 h-full shrink-0">
                   <VideoTile
                     displayName={displayName}
@@ -1035,7 +1195,6 @@ export default function MeetingRoom({
                   />
                 </div>
 
-                {/* Remote Participants in Filmstrip */}
                 {remotePeersList.map((peer) => (
                   <div key={peer.peerId} className="w-48 sm:w-56 h-full shrink-0">
                     <VideoTile
@@ -1054,8 +1213,87 @@ export default function MeetingRoom({
                 ))}
               </div>
             </div>
+          ) : viewMode === 'speaker' ? (
+            /* 2. SPEAKER VIEW LAYOUT */
+            <div className="w-full h-full max-w-7xl flex flex-col space-y-3">
+              {/* Primary Active Speaker Focal Stage */}
+              <div className="relative flex-1 min-h-[50vh] max-h-[72vh] rounded-xl overflow-hidden border border-[#242732] shadow-2xl flex items-center justify-center">
+                {spotlight.isLocal ? (
+                  <VideoTile
+                    displayName={displayName}
+                    stream={localStream}
+                    isLocal={true}
+                    isHost={isHost}
+                    isAudioMuted={isAudioMuted}
+                    isVideoOff={isVideoOff}
+                    isSpeaking={isLocalSpeaking}
+                    isHandRaised={isLocalHandRaised}
+                    isPinned={pinnedPeerId === 'local'}
+                    onTogglePin={() => setPinnedPeerId(pinnedPeerId === 'local' ? null : 'local')}
+                  />
+                ) : (
+                  <VideoTile
+                    displayName={spotlight.peer!.displayName}
+                    stream={spotlight.peer!.stream}
+                    isLocal={false}
+                    isHost={spotlight.peer!.userId === meeting.hostUserId}
+                    isAudioMuted={spotlight.peer!.isAudioMuted}
+                    isVideoOff={spotlight.peer!.isVideoOff}
+                    isSpeaking={spotlight.peer!.isSpeaking}
+                    isHandRaised={!!remoteHands.get(spotlight.peer!.peerId)}
+                    isPinned={pinnedPeerId === spotlight.peer!.peerId}
+                    onTogglePin={() =>
+                      setPinnedPeerId(pinnedPeerId === spotlight.peer!.peerId ? null : spotlight.peer!.peerId)
+                    }
+                  />
+                )}
+              </div>
+
+              {/* Speaker View Filmstrip for Remaining Participants */}
+              {totalParticipantCount > 1 && (
+                <div className="h-28 sm:h-32 flex items-center space-x-3 overflow-x-auto pb-1 shrink-0">
+                  {/* If spotlight is remote, local user goes in filmstrip */}
+                  {!spotlight.isLocal && (
+                    <div className="w-44 sm:w-48 h-full shrink-0">
+                      <VideoTile
+                        displayName={displayName}
+                        stream={localStream}
+                        isLocal={true}
+                        isHost={isHost}
+                        isAudioMuted={isAudioMuted}
+                        isVideoOff={isVideoOff}
+                        isSpeaking={isLocalSpeaking}
+                        isHandRaised={isLocalHandRaised}
+                        isPinned={pinnedPeerId === 'local'}
+                        onTogglePin={() => setPinnedPeerId('local')}
+                      />
+                    </div>
+                  )}
+
+                  {/* Remote peers that are not in spotlight */}
+                  {remotePeersList
+                    .filter((p) => spotlight.isLocal || p.peerId !== spotlight.peer?.peerId)
+                    .map((peer) => (
+                      <div key={peer.peerId} className="w-44 sm:w-48 h-full shrink-0">
+                        <VideoTile
+                          displayName={peer.displayName}
+                          stream={peer.stream}
+                          isLocal={false}
+                          isHost={peer.userId === meeting.hostUserId}
+                          isAudioMuted={peer.isAudioMuted}
+                          isVideoOff={peer.isVideoOff}
+                          isSpeaking={peer.isSpeaking}
+                          isHandRaised={!!remoteHands.get(peer.peerId)}
+                          isPinned={pinnedPeerId === peer.peerId}
+                          onTogglePin={() => setPinnedPeerId(peer.peerId)}
+                        />
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           ) : (
-            /* STANDARD GALLERY / SPEAKER GRID */
+            /* 3. GALLERY VIEW GRID */
             <div className={`w-full h-full max-h-[82vh] grid gap-3 sm:gap-4 ${getGridClass()}`}>
               <VideoTile
                 displayName={displayName}
@@ -1089,6 +1327,7 @@ export default function MeetingRoom({
           )}
         </main>
 
+        {/* Chat Panel */}
         {activePanel === 'chat' && (
           <ChatPanel
             messages={messages}
@@ -1102,6 +1341,7 @@ export default function MeetingRoom({
           />
         )}
 
+        {/* Participants Panel - Shown by default */}
         {activePanel === 'participants' && (
           <ParticipantsPanel
             currentUserId={userId}
@@ -1109,7 +1349,9 @@ export default function MeetingRoom({
             isHost={isHost}
             localAudioMuted={isAudioMuted}
             localVideoOff={isVideoOff}
+            localHandRaised={isLocalHandRaised}
             remotePeers={remotePeersList}
+            remoteHands={remoteHands}
             meetingCode={meeting.meetingCode}
             onMuteParticipant={handleMuteParticipant}
             onKickParticipant={handleKickParticipant}
@@ -1118,6 +1360,7 @@ export default function MeetingRoom({
           />
         )}
 
+        {/* Meeting Info Panel */}
         {activePanel === 'info' && (
           <InfoPanel meeting={meeting} onClose={() => setActivePanel('none')} />
         )}
@@ -1158,7 +1401,7 @@ export default function MeetingRoom({
             <div className="pt-2">
               <button
                 onClick={() => {
-                  if (localStream) localStream.getTracks().forEach((t) => t.stop());
+                  stopAllMediaTracks();
                   router.push('/');
                 }}
                 className="w-full py-2.5 bg-[#2563eb] hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-semibold rounded-lg transition"
