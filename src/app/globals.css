@@ -1,35 +1,36 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --bg-base: #000000;
-    --bg-surface: #161618;
-    --bg-surface-elevated: #1c1c1e;
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-hover: rgba(255, 255, 255, 0.16);
-    --text-primary: #f5f5f7;
-    --text-secondary: #86868b;
-    --text-tertiary: #515154;
-    --accent: #2997ff;
-    --accent-hover: #0077ed;
-    --destructive: #ff453a;
-    --destructive-hover: #d73a31;
-    --success: #30d158;
-  }
+:root {
+  --bg-canvas: #0e1015;
+  --bg-surface: #16181f;
+  --bg-surface-elevated: #1e212b;
+  --bg-surface-hover: #262a36;
+  --border-subtle: #242732;
+  --border-strong: #333745;
+  --border-focus: #3b82f6;
+  --text-primary: #f1f2f4;
+  --text-secondary: #8e929b;
+  --text-muted: #5c606a;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --success: #16a34a;
+  --warning: #d97706;
 }
 
 body {
-  background-color: var(--bg-base);
+  background-color: var(--bg-canvas);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.011em;
   overflow-x: hidden;
   min-height: 100vh;
 }
 
-/* Subtle, minimal Apple-like scrollbar */
+/* Subtle, functional scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -40,34 +41,57 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 9999px;
+  background: #2a2d38;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: #383c4a;
 }
 
-/* Apple-style Translucent Material */
-.apple-glass {
-  background: rgba(28, 28, 30, 0.72);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+/* Natural surfaces (no artificial glowing or excessive transparency) */
+.surface-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
 }
 
-.apple-card {
-  background: #161618;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
+.surface-elevated {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
 }
 
-/* Minimal active speaker indicator */
-.speaker-active {
-  box-shadow: 0 0 0 1.5px #2997ff;
+.surface-dock {
+  background-color: rgba(22, 24, 31, 0.95);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.5);
 }
 
-/* Smooth subtle transitions */
-button, input, a {
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+.surface-modal {
+  background-color: #16181f;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7);
+}
+
+/* Natural speaking indicator - crisp, no neon bloom */
+.tile-speaking {
+  border-color: #3b82f6 !important;
+}
+
+/* Standardized component transitions */
+button, input, select, textarea, a {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+
+/* Accessibility: respect user preferences for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

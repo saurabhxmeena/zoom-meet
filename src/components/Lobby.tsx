@@ -1,8 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Video as VideoIcon, VideoOff, AlertCircle, ArrowLeft } from 'lucide-react';
+import {
+  Mic,
+  MicOff,
+  Video as VideoIcon,
+  VideoOff,
+  AlertCircle,
+  ArrowLeft,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { IMeeting } from '@/lib/types';
+import { createAudioAnalyser } from '@/lib/webrtc';
 import Link from 'next/link';
 
 interface LobbyProps {
@@ -22,9 +32,13 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
   const [passcode, setPasscode] = useState('');
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioCleanupRef = useRef<(() => void) | null>(null);
+  const hasJoinedRef = useRef(false);
 
   useEffect(() => {
     let localStream: MediaStream | null = null;
@@ -38,7 +52,13 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
         setStream(localStream);
         if (videoRef.current) {
           videoRef.current.srcObject = localStream;
+          videoRef.current.play().catch(() => {});
         }
+
+        const cleanup = createAudioAnalyser(localStream, (speaking) => {
+          setIsSpeaking(speaking);
+        });
+        if (cleanup) audioCleanupRef.current = cleanup;
       } catch (err) {
         console.warn('Media devices not permitted or unavailable:', err);
         setPermissionError('Camera or microphone access is unavailable. You can still join to view and listen.');
@@ -50,7 +70,8 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
     initMedia();
 
     return () => {
-      if (localStream) {
+      if (audioCleanupRef.current) audioCleanupRef.current();
+      if (localStream && !hasJoinedRef.current) {
         localStream.getTracks().forEach((track) => track.stop());
       }
     };
@@ -84,6 +105,7 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
     e.preventDefault();
     if (!displayName.trim()) return;
 
+    hasJoinedRef.current = true;
     onJoin({
       displayName: displayName.trim(),
       isAudioMuted,
@@ -93,30 +115,51 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
     });
   };
 
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/meet/${meeting.meetingCode}`;
+    navigator.clipboard.writeText(url);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 1800);
+  };
+
   const initials = displayName
     ? displayName.trim().charAt(0).toUpperCase()
     : 'U';
 
   return (
-    <div className="min-h-screen bg-black text-[#f5f5f7] flex flex-col justify-between p-4 sm:p-8">
+    <div className="min-h-screen bg-[#0e1015] text-[#f1f2f4] flex flex-col justify-between p-4 sm:p-8 select-none">
       
-      {/* Top back link */}
-      <header className="max-w-4xl mx-auto w-full">
+      {/* Top Navigation */}
+      <header className="max-w-4xl mx-auto w-full flex items-center justify-between">
         <Link
           href="/"
-          className="inline-flex items-center space-x-1.5 text-xs text-[#86868b] hover:text-[#f5f5f7] transition"
+          className="inline-flex items-center space-x-1.5 text-xs font-medium text-[#8e929b] hover:text-[#f1f2f4] transition"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Leave lobby</span>
+          <span>Back</span>
         </Link>
+
+        {/* Meeting ID */}
+        <div className="flex items-center space-x-1.5 text-xs text-[#8e929b]">
+          <span className="font-mono bg-[#16181f] px-2.5 py-1 rounded-md border border-[#242732]">
+            {meeting.meetingCode}
+          </span>
+          <button
+            onClick={handleCopyLink}
+            title="Copy invite link"
+            className="p-1.5 text-[#8e929b] hover:text-[#f1f2f4] hover:bg-[#181a20] rounded-md transition"
+          >
+            {copiedCode ? <Check className="w-3.5 h-3.5 text-[#16a34a]" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-4xl mx-auto w-full my-auto grid grid-cols-1 md:grid-cols-12 gap-8 items-center py-6">
         
-        {/* Left: Video Preview Window */}
+        {/* Left: Video Preview */}
         <div className="md:col-span-7 flex flex-col items-center">
-          <div className="relative w-full aspect-[16/10] bg-[#161618] rounded-3xl overflow-hidden border border-white/[0.08] shadow-xl flex items-center justify-center">
+          <div className="relative w-full aspect-[16/10] bg-[#16181f] rounded-2xl overflow-hidden border border-[#242732] flex items-center justify-center">
             
             <video
               ref={videoRef}
@@ -128,38 +171,53 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
               }`}
             />
 
-            {/* Camera Off Contact Avatar */}
+            {/* Camera Off Placeholder */}
             {isVideoOff && (
-              <div className="flex flex-col items-center justify-center space-y-3">
-                <div className="w-20 h-20 rounded-full bg-[#1c1c1e] border border-white/[0.08] flex items-center justify-center text-xl font-medium text-[#86868b]">
+              <div className="flex flex-col items-center justify-center space-y-3 z-10">
+                <div className="w-20 h-20 rounded-full bg-[#1e212b] border border-[#2a2d38] flex items-center justify-center text-xl font-medium text-[#8e929b]">
                   {initials}
                 </div>
-                <span className="text-xs text-[#86868b]">Camera is off</span>
+                <span className="text-xs text-[#5c606a]">Camera is turned off</span>
               </div>
             )}
 
-            {/* Subtle Controls Overlay */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-3 bg-black/60 backdrop-blur-xl px-3.5 py-2 rounded-full border border-white/[0.08]">
+            {/* Floating Quick Controls at Bottom */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-3 bg-[#111217]/90 px-3.5 py-2 rounded-xl border border-[#242732] z-20">
+              
+              {/* Mic toggle */}
               <button
                 type="button"
                 onClick={toggleMic}
-                className={`p-2.5 rounded-full transition ${
+                className={`p-2.5 rounded-lg transition ${
                   isAudioMuted
-                    ? 'bg-[#ff453a] text-white hover:bg-[#d73a31]'
-                    : 'bg-white/[0.1] text-[#f5f5f7] hover:bg-white/[0.18]'
+                    ? 'bg-[#dc2626] text-white hover:bg-[#b91c1c]'
+                    : 'bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37]'
                 }`}
                 title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
               >
                 {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
 
+              {/* Natural Speaking Indicator Dot */}
+              {!isAudioMuted && (
+                <div className="flex items-center space-x-1 px-1">
+                  <span
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      isSpeaking ? 'bg-[#16a34a]' : 'bg-[#3b3f4d]'
+                    }`}
+                    title={isSpeaking ? 'Detecting audio' : 'Microphone ready'}
+                  />
+                </div>
+              )}
+
+              {/* Video toggle */}
               <button
                 type="button"
                 onClick={toggleVideo}
-                className={`p-2.5 rounded-full transition ${
+                className={`p-2.5 rounded-lg transition ${
                   isVideoOff
-                    ? 'bg-[#ff453a] text-white hover:bg-[#d73a31]'
-                    : 'bg-white/[0.1] text-[#f5f5f7] hover:bg-white/[0.18]'
+                    ? 'bg-[#dc2626] text-white hover:bg-[#b91c1c]'
+                    : 'bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37]'
                 }`}
                 title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
               >
@@ -169,27 +227,28 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
           </div>
 
           {permissionError && (
-            <div className="mt-3 flex items-start space-x-2 text-xs text-[#86868b] bg-[#161618] border border-white/[0.06] p-3 rounded-xl w-full">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#ff9f0a]" />
+            <div className="mt-3 flex items-start space-x-2 text-xs text-[#8e929b] bg-[#16181f] border border-[#2e2316] p-3 rounded-xl w-full">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#d97706]" />
               <span>{permissionError}</span>
             </div>
           )}
         </div>
 
         {/* Right: Join Form */}
-        <div className="md:col-span-5 bg-[#161618] border border-white/[0.06] rounded-3xl p-6 sm:p-7 shadow-xl space-y-6">
+        <div className="md:col-span-5 surface-card p-6 sm:p-7 space-y-5">
+          
           <div className="space-y-1">
-            <h1 className="text-xl font-semibold text-[#f5f5f7] tracking-tight truncate">
+            <h1 className="text-xl font-semibold text-[#f1f2f4] tracking-tight truncate">
               {meeting.title}
             </h1>
-            <p className="text-xs text-[#86868b]">
+            <p className="text-xs text-[#8e929b]">
               Hosted by {meeting.hostName}
             </p>
           </div>
 
           <form onSubmit={handleJoinClick} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-[#86868b] mb-1.5">
+              <label className="block text-xs font-medium text-[#8e929b] mb-1.5">
                 Your name
               </label>
               <input
@@ -198,13 +257,13 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="Enter your name"
-                className="w-full h-11 px-3.5 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-sm text-[#f5f5f7] placeholder-[#515154] transition"
+                className="w-full h-10 px-3.5 bg-[#101217] border border-[#262934] focus:border-[#3b82f6] focus:outline-none rounded-lg text-sm text-[#f1f2f4] placeholder-[#5c606a] transition"
               />
             </div>
 
             {meeting.settings.requirePasscode && (
               <div>
-                <label className="block text-xs font-medium text-[#86868b] mb-1.5">
+                <label className="block text-xs font-medium text-[#8e929b] mb-1.5">
                   Meeting passcode
                 </label>
                 <input
@@ -213,23 +272,27 @@ export default function Lobby({ meeting, initialDisplayName, onJoin }: LobbyProp
                   value={passcode}
                   onChange={(e) => setPasscode(e.target.value)}
                   placeholder="Enter passcode"
-                  className="w-full h-11 px-3.5 bg-black border border-white/[0.08] focus:border-[#2997ff] focus:outline-none rounded-xl text-sm text-[#f5f5f7] placeholder-[#515154] transition"
+                  className="w-full h-10 px-3.5 bg-[#101217] border border-[#262934] focus:border-[#3b82f6] focus:outline-none rounded-lg text-sm text-[#f1f2f4] placeholder-[#5c606a] transition"
                 />
               </div>
             )}
 
+            {/* Natural device status feedback */}
+            <div className="text-[11px] text-[#8e929b] pt-1 flex items-center space-x-3">
+              <span>Mic: {isAudioMuted ? 'Muted' : 'Ready'}</span>
+              <span>•</span>
+              <span>Camera: {isVideoOff ? 'Off' : 'Ready'}</span>
+            </div>
+
             <button
               type="submit"
               disabled={!displayName.trim()}
-              className="w-full h-11 bg-[#2997ff] hover:bg-[#0077ed] active:scale-[0.99] disabled:opacity-40 text-white font-medium text-sm rounded-xl transition shadow-sm mt-2"
+              className="w-full h-10 bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] disabled:opacity-40 text-white font-medium text-sm rounded-lg transition mt-2"
             >
               Join Meeting
             </button>
           </form>
 
-          <div className="pt-2 border-t border-white/[0.04] text-[11px] text-[#515154] font-mono text-center">
-            {meeting.meetingCode}
-          </div>
         </div>
 
       </main>

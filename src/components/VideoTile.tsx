@@ -29,10 +29,24 @@ export default function VideoTile({
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
+    if (stream) {
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream;
+      }
+      videoEl.muted = isLocal;
+      if (!isVideoOff) {
+        videoEl.play().catch((err) => {
+          // Playback might need a user gesture if unmuted remote stream
+          console.debug('[VideoTile] play interrupted or pending gesture:', err?.name);
+        });
+      }
+    } else {
+      videoEl.srcObject = null;
     }
-  }, [stream]);
+  }, [stream, isVideoOff, isLocal]);
 
   const initials = displayName
     .split(' ')
@@ -41,14 +55,16 @@ export default function VideoTile({
     .map((s) => s[0].toUpperCase())
     .join('') || 'U';
 
+  const isActuallySpeaking = isSpeaking && !isAudioMuted;
+
   return (
     <div
-      className={`relative w-full h-full min-h-[220px] bg-[#161618] rounded-2xl overflow-hidden border transition-all duration-200 group flex items-center justify-center ${
-        isSpeaking && !isAudioMuted
-          ? 'border-[#2997ff]/70'
+      className={`relative w-full h-full min-h-[220px] bg-[#16181f] rounded-xl overflow-hidden transition group flex items-center justify-center ${
+        isActuallySpeaking
+          ? 'ring-1.5 ring-[#3b82f6] border-transparent'
           : isPinned
-          ? 'border-[#2997ff]/40'
-          : 'border-white/[0.06]'
+          ? 'ring-1 ring-[#3b82f6]/70 border-transparent'
+          : 'border border-[#242732]'
       }`}
     >
       {/* Video Element */}
@@ -64,11 +80,11 @@ export default function VideoTile({
 
       {/* Avatar when camera is off */}
       {(isVideoOff || !stream) && (
-        <div className="flex flex-col items-center justify-center space-y-2 z-10 select-none">
-          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#1c1c1e] border border-white/[0.08] flex items-center justify-center text-lg sm:text-xl font-medium text-[#86868b]">
+        <div className="flex flex-col items-center justify-center space-y-2.5 z-10 select-none p-4">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#1e212b] border border-[#2a2d38] flex items-center justify-center text-lg sm:text-xl font-medium text-[#8e929b]">
             {initials}
           </div>
-          <span className="text-xs text-[#86868b] max-w-[140px] truncate font-normal">
+          <span className="text-xs text-[#8e929b] max-w-[140px] truncate font-normal">
             {displayName}
           </span>
         </div>
@@ -78,10 +94,10 @@ export default function VideoTile({
       {onTogglePin && (
         <button
           onClick={onTogglePin}
-          className={`absolute top-2.5 right-2.5 z-20 p-1.5 rounded-lg backdrop-blur-md transition ${
+          className={`absolute top-2.5 right-2.5 z-20 p-1.5 rounded-lg transition ${
             isPinned
-              ? 'bg-white/20 text-white'
-              : 'opacity-0 group-hover:opacity-100 bg-black/40 text-[#86868b] hover:text-white'
+              ? 'bg-[#2563eb] text-white'
+              : 'opacity-0 group-hover:opacity-100 bg-[#0e1015]/80 text-[#8e929b] hover:text-[#f1f2f4] border border-[#242732]'
           }`}
           title={isPinned ? 'Unpin' : 'Pin'}
         >
@@ -89,12 +105,22 @@ export default function VideoTile({
         </button>
       )}
 
-      {/* Bottom Identity Pill */}
-      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center space-x-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/[0.06] text-xs text-[#f5f5f7] pointer-events-none max-w-[85%]">
+      {/* Identity Pill at Bottom Left */}
+      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center space-x-1.5 bg-[#0e1015]/85 px-2.5 py-1 rounded-md border border-[#242732] text-xs text-[#f1f2f4] pointer-events-none max-w-[85%]">
+        
+        {/* Speaking Dot */}
+        {isActuallySpeaking && (
+          <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] shrink-0" />
+        )}
+
         <span className="font-normal truncate">{displayName}</span>
-        {isLocal && <span className="text-[#86868b] text-[11px]">(You)</span>}
-        {isHost && <span className="text-[#86868b] text-[11px]">• Host</span>}
-        {isAudioMuted && <MicOff className="w-3 h-3 text-[#ff453a] ml-1 shrink-0" />}
+        {isLocal && <span className="text-[#8e929b] text-[11px]">(You)</span>}
+        {isHost && <span className="text-[#8e929b] text-[11px]">• Host</span>}
+
+        {/* Muted Icon */}
+        {isAudioMuted && (
+          <MicOff className="w-3 h-3 text-[#dc2626] ml-1 shrink-0" />
+        )}
       </div>
     </div>
   );

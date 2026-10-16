@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { inMemoryStore } from '@/lib/store';
+import { connectDB } from '@/lib/db';
+import { SignalModel } from '@/lib/models/Signal';
 
 export async function POST(
   req: NextRequest,
@@ -14,25 +16,43 @@ export async function POST(
       return NextResponse.json({ error: 'Missing signal parameters' }, { status: 400 });
     }
 
+    const timestamp = Date.now();
+    const toTarget = to || 'all';
+
+    // 1. In-memory store update (for local dev fallback)
     if (!inMemoryStore.signals.has(code)) {
       inMemoryStore.signals.set(code, []);
     }
-
     const queue = inMemoryStore.signals.get(code)!;
     queue.push({
       from,
-      to: to || 'all',
+      to: toTarget,
       type,
       payload,
-      timestamp: Date.now(),
+      timestamp,
     });
-
-    // Prune signals older than 30 seconds
-    const cutoff = Date.now() - 30000;
+    const cutoff = timestamp - 60000;
     const filtered = queue.filter((item) => item.timestamp > cutoff);
     inMemoryStore.signals.set(code, filtered);
 
-    return NextResponse.json({ success: true });
+    // 2. Database update (for Vercel serverless multi-instance cross-device sync)
+    try {
+      const dbReady = await connectDB();
+      if (dbReady) {
+        await SignalModel.create({
+          meetingCode: code,
+          from,
+          to: toTarget,
+          type,
+          payload,
+          createdAt: new Date(timestamp),
+        });
+      }
+    } catch (dbErr) {
+      console.warn('[Signal Route] DB signal persistence warning:', dbErr);
+    }
+
+    return NextResponse.json({ success: true, timestamp });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
@@ -48,6 +68,34 @@ export async function GET(
     const peerId = searchParams.get('peerId');
     const since = parseInt(searchParams.get('since') || '0', 10);
 
+    try {
+      const dbReady = await connectDB();
+      if (dbReady) {
+        const query: any = {
+          meetingCode: code,
+          createdAt: { $gt: new Date(since) },
+        };
+        if (peerId) {
+          query.from = { $ne: peerId };
+          query.$or = [{ to: 'all' }, { to: peerId }];
+        }
+
+        const docs = await SignalModel.find(query).sort({ createdAt: 1 }).lean();
+        const messages = docs.map((doc: any) => ({
+          from: doc.from,
+          to: doc.to,
+          type: doc.type,
+          payload: doc.payload,
+          timestamp: new Date(doc.createdAt).getTime(),
+        }));
+
+        return NextResponse.json({ signals: messages, serverTime: Date.now() });
+      }
+    } catch (dbErr) {
+      console.warn('[Signal Route] DB signal fetch fallback:', dbErr);
+    }
+
+    // In-memory fallback
     const queue = inMemoryStore.signals.get(code) || [];
     const messages = queue.filter(
       (item) => item.timestamp > since && item.from !== peerId && (item.to === 'all' || item.to === peerId)
