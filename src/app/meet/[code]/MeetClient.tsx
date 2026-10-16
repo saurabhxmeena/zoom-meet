@@ -26,6 +26,7 @@ export default function MeetClient({ code }: MeetClientProps) {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [clientSessionId] = useState(() => 'sess_' + Math.random().toString(36).substring(2, 9));
   const [joinedDisplayName, setJoinedDisplayName] = useState('');
   const [joinedUserId, setJoinedUserId] = useState('');
   const [isHost, setIsHost] = useState(false);
@@ -196,6 +197,7 @@ export default function MeetClient({ code }: MeetClientProps) {
       <MeetingRoom
         meeting={meeting}
         userId={joinedUserId}
+        clientSessionId={clientSessionId}
         displayName={joinedDisplayName}
         isHost={isHost}
         initialStream={activeStream}

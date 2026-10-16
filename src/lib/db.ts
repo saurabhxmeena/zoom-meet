@@ -264,6 +264,7 @@ export async function updateMeetingStatus(code: string, status: 'active' | 'ende
 export async function addMessage(data: {
   meetingId: string;
   senderUserId: string;
+  senderSessionId?: string;
   senderName: string;
   text: string;
 }): Promise<IMessage> {
@@ -272,15 +273,19 @@ export async function addMessage(data: {
     const msg = await MessageModel.create({
       meetingId: data.meetingId,
       senderUserId: data.senderUserId,
+      senderSessionId: data.senderSessionId || '',
       senderName: data.senderName,
       text: data.text,
+      reactions: {},
     });
     return {
       _id: String(msg._id),
       meetingId: msg.meetingId,
       senderUserId: msg.senderUserId,
+      senderSessionId: msg.senderSessionId,
       senderName: msg.senderName,
       text: msg.text,
+      reactions: msg.reactions || {},
       createdAt: msg.createdAt,
     };
   }
@@ -289,8 +294,10 @@ export async function addMessage(data: {
     _id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
     meetingId: data.meetingId,
     senderUserId: data.senderUserId,
+    senderSessionId: data.senderSessionId,
     senderName: data.senderName,
     text: data.text,
+    reactions: {},
     createdAt: new Date().toISOString(),
   };
   inMemoryStore.messages.push(newMsg);
@@ -305,8 +312,10 @@ export async function getMessagesByMeeting(meetingId: string): Promise<IMessage[
       _id: String(m._id),
       meetingId: m.meetingId,
       senderUserId: m.senderUserId,
+      senderSessionId: m.senderSessionId || '',
       senderName: m.senderName,
       text: m.text,
+      reactions: m.reactions || {},
       createdAt: m.createdAt,
     }));
   }

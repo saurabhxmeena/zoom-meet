@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findMeetingByCode, addMessage, getMessagesByMeeting } from '@/lib/db';
+import { findMeetingByCode, addMessage, getMessagesByMeeting, connectDB } from '@/lib/db';
 import { getUserFromRequest } from '@/lib/auth';
+import { inMemoryStore } from '@/lib/store';
+import { SignalModel } from '@/lib/models/Signal';
 
 export async function GET(
   req: NextRequest,
@@ -27,7 +29,7 @@ export async function POST(
   try {
     const { code } = await params;
     const body = await req.json();
-    const { text, senderName, senderUserId } = body;
+    const { text, senderName, senderUserId, senderSessionId } = body;
 
     if (!text || !text.trim()) {
       return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
@@ -53,9 +55,45 @@ export async function POST(
     const message = await addMessage({
       meetingId: meeting._id,
       senderUserId: resolvedUserId,
+      senderSessionId,
       senderName: resolvedName,
       text: text.trim(),
     });
+
+    // Auto-broadcast real-time signal directly on server
+    const now = Date.now();
+    const signalOrigin = senderSessionId || resolvedUserId;
+    const signalItem = {
+      from: signalOrigin,
+      to: 'all',
+      type: 'chat-message',
+      payload: { message },
+      timestamp: now,
+    };
+
+    if (!inMemoryStore.signals.has(code)) {
+      inMemoryStore.signals.set(code, []);
+    }
+    const queue = inMemoryStore.signals.get(code)!;
+    queue.push(signalItem);
+    const cutoff = now - 60000;
+    inMemoryStore.signals.set(code, queue.filter((item) => item.timestamp > cutoff));
+
+    try {
+      const dbReady = await connectDB();
+      if (dbReady) {
+        await SignalModel.create({
+          meetingCode: code,
+          from: signalOrigin,
+          to: 'all',
+          type: 'chat-message',
+          payload: { message },
+          createdAt: new Date(now),
+        });
+      }
+    } catch (dbErr) {
+      console.warn('[Messages Route] DB signal broadcast notice:', dbErr);
+    }
 
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {

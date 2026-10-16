@@ -146,7 +146,7 @@ export default function EmojiPicker({
   return (
     <div
       ref={containerRef}
-      className="absolute bottom-full mb-2 left-2 right-2 sm:left-auto sm:right-0 sm:w-80 max-h-[320px] bg-[#16181f] border border-[#2a2d38] rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col text-xs animate-in fade-in zoom-in-95 duration-150 select-none"
+      className="fixed inset-x-3 bottom-24 sm:absolute sm:inset-x-auto sm:bottom-full sm:mb-2 sm:right-0 sm:w-80 max-h-[260px] sm:max-h-[320px] bg-[#16181f] border border-[#2a2d38] rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col text-xs animate-in fade-in zoom-in-95 duration-150 select-none"
     >
       {/* Top Search & Close */}
       <div className="p-2.5 border-b border-[#242732] flex items-center space-x-2 bg-[#12141a]">

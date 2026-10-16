@@ -96,7 +96,7 @@ export default function MeetingControls({
 
   return (
     <>
-      <footer className="fixed bottom-0 left-0 right-0 z-30 p-2 sm:p-5 pb-safe flex items-center justify-center pointer-events-none select-none">
+      <footer className={`fixed bottom-0 left-0 right-0 z-30 p-2 sm:p-5 pb-safe flex items-center justify-center pointer-events-none select-none transition-opacity duration-200 ${activePanel !== 'none' ? 'max-sm:opacity-0 max-sm:pointer-events-none max-sm:h-0' : 'opacity-100'}`}>
         <div className="surface-dock px-2 sm:px-3 py-1.5 sm:py-2 flex items-center space-x-1 sm:space-x-2 pointer-events-auto relative max-w-[calc(100vw-0.75rem)] overflow-x-auto sm:overflow-visible no-scrollbar shadow-2xl">
           {/* Microphone */}
           <button
@@ -138,21 +138,22 @@ export default function MeetingControls({
             </button>
           )}
 
-          <div className="w-[1px] h-4 sm:h-5 bg-[#2a2d38] mx-0.5 shrink-0" />
-
-          {/* Screen Share */}
-          <button
-            type="button"
-            onClick={onToggleScreenShare}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition active:scale-95 shrink-0 ${
-              isScreenSharing
-                ? 'bg-[#2563eb] text-white'
-                : 'bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37] border border-[#2a2d38]'
-            }`}
-            title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
-          >
-            <MonitorUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </button>
+          {/* Screen Share (Desktop only - mobile browsers do not support getDisplayMedia) */}
+          <div className="hidden sm:flex items-center space-x-1 sm:space-x-2">
+            <div className="w-[1px] h-4 sm:h-5 bg-[#2a2d38] mx-0.5 shrink-0" />
+            <button
+              type="button"
+              onClick={onToggleScreenShare}
+              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition active:scale-95 shrink-0 ${
+                isScreenSharing
+                  ? 'bg-[#2563eb] text-white'
+                  : 'bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37] border border-[#2a2d38]'
+              }`}
+              title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
+            >
+              <MonitorUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+          </div>
 
           {/* Meeting Reactions Popover & Trigger */}
           <div className="relative shrink-0" ref={reactionsRef}>
@@ -253,7 +254,7 @@ export default function MeetingControls({
           {/* Meeting Info */}
           <button
             onClick={() => onTogglePanel('info')}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition active:scale-95 shrink-0 ${
+            className={`hidden sm:flex w-9 h-9 sm:w-10 sm:h-10 rounded-lg items-center justify-center transition active:scale-95 shrink-0 ${
               activePanel === 'info'
                 ? 'bg-[#2563eb] text-white'
                 : 'bg-[#1e212b] text-[#f1f2f4] hover:bg-[#282b37] border border-[#2a2d38]'

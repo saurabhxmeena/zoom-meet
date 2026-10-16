@@ -22,6 +22,7 @@ import FloatingSidebar from './FloatingSidebar';
 interface MeetingRoomProps {
   meeting: IMeeting;
   userId: string;
+  clientSessionId?: string;
   displayName: string;
   isHost: boolean;
   initialStream: MediaStream | null;
@@ -41,6 +42,7 @@ interface FloatingReaction {
 export default function MeetingRoom({
   meeting,
   userId,
+  clientSessionId,
   displayName,
   isHost,
   initialStream,
@@ -94,6 +96,9 @@ export default function MeetingRoom({
   useEffect(() => {
     activePanelRef.current = activePanel;
   }, [activePanel]);
+
+  // Real-time WebRTC DataConnections mesh for peer-to-peer messaging
+  const activeDataConnectionsRef = useRef<Map<string, any>>(new Map());
 
   // Meeting reactions & Hand raise state
   const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
@@ -386,7 +391,10 @@ export default function MeetingRoom({
     async function initWebRTC() {
       try {
         const PeerClass = (await import('peerjs')).default;
-        const myPeerId = `meet_${meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '')}_${userId.slice(-6)}`;
+        const cleanMeetingCode = meeting.meetingCode.replace(/[^a-zA-Z0-9]/g, '');
+        const cleanUserId = userId.replace(/[^a-zA-Z0-9]/g, '').slice(-5);
+        const sessionSuffix = (clientSessionId || Math.random().toString(36).substring(2, 8)).slice(-5);
+        const myPeerId = `meet_${cleanMeetingCode}_${cleanUserId}_${sessionSuffix}`;
 
         let resolvedIceServers = ICE_SERVERS;
         try {
@@ -417,10 +425,50 @@ export default function MeetingRoom({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               from: id,
+              senderSessionId: clientSessionId,
               type: 'peer-joined',
-              payload: { userId, displayName, isAudioMuted, isVideoOff, isScreenSharing },
+              payload: { userId, clientSessionId, displayName, isAudioMuted, isVideoOff, isScreenSharing },
             }),
           }).catch(console.warn);
+        });
+
+        // WebRTC P2P DataChannel Connection Handler (Direct zero-latency messaging between phones)
+        peer.on('connection', (conn: any) => {
+          conn.on('open', () => {
+            activeDataConnectionsRef.current.set(conn.peer, conn);
+          });
+          conn.on('data', (data: any) => {
+            if (!isSubscribed || !data) return;
+            if (data.type === 'chat-message' && data.message) {
+              const incomingMsg = data.message;
+              setMessages((prev) => {
+                if (prev.some((m) => m._id === incomingMsg._id)) return prev;
+                if (activePanelRef.current !== 'chat') {
+                  setUnreadCount((c) => c + 1);
+                }
+                return [...prev, incomingMsg];
+              });
+            } else if (data.type === 'peer-reaction') {
+              const reactionEmoji = data.payload?.emoji;
+              const sender = data.payload?.senderName || 'Participant';
+              const xOffset = data.payload?.xOffset ?? ((Math.random() - 0.5) * 160);
+              if (reactionEmoji) {
+                const newReaction: FloatingReaction = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  emoji: reactionEmoji,
+                  senderName: sender,
+                  xOffset,
+                };
+                setFloatingReactions((prev) => [...prev, newReaction]);
+                setTimeout(() => {
+                  setFloatingReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
+                }, 2600);
+              }
+            }
+          });
+          conn.on('close', () => {
+            activeDataConnectionsRef.current.delete(conn.peer);
+          });
         });
 
         peer.on('call', (call: any) => {
@@ -493,8 +541,16 @@ export default function MeetingRoom({
         }
       });
       activeCallsRef.current.clear();
+      activeDataConnectionsRef.current.forEach((conn) => {
+        try {
+          conn.close();
+        } catch {
+          // ignore
+        }
+      });
+      activeDataConnectionsRef.current.clear();
     };
-  }, [meeting.meetingCode, userId, displayName]);
+  }, [meeting.meetingCode, userId, clientSessionId, displayName]);
 
   // Signaling & Presence Sync Poll
   useEffect(() => {
@@ -503,8 +559,10 @@ export default function MeetingRoom({
 
     const syncMeeting = async () => {
       if (!isAlive) return;
+
+      // 1. Real-time Signaling Sync
       try {
-        const myPeerId = peerInstanceRef.current?.id;
+        const myPeerId = peerInstanceRef.current?.id || clientSessionId || userId;
         const res = await fetch(
           `/api/meetings/${meeting.meetingCode}/signal?peerId=${myPeerId || ''}&since=${lastSignalTime}`
         );
@@ -515,46 +573,76 @@ export default function MeetingRoom({
 
           if (data.signals && data.signals.length > 0) {
             for (const sig of data.signals) {
-              if (sig.from === myPeerId) continue;
+              if (sig.from === myPeerId || (clientSessionId && sig.from === clientSessionId)) continue;
 
-              // 1. Peer joined -> Deterministic call initiation
+              // 1. Peer joined -> Deterministic call initiation & DataConnection
               if (sig.type === 'peer-joined') {
                 const shouldInitiate = myPeerId && myPeerId.localeCompare(sig.from) < 0;
 
-                if (shouldInitiate && peerInstanceRef.current && !activeCallsRef.current.has(sig.from)) {
-                  const outboundStream = screenStreamRef.current || localStreamRef.current;
-                  const call = peerInstanceRef.current.call(sig.from, outboundStream, {
-                    metadata: { userId, displayName },
-                  });
+                if (shouldInitiate && peerInstanceRef.current) {
+                  if (!activeCallsRef.current.has(sig.from)) {
+                    const outboundStream = screenStreamRef.current || localStreamRef.current;
+                    const call = peerInstanceRef.current.call(sig.from, outboundStream, {
+                      metadata: { userId, clientSessionId, displayName },
+                    });
 
-                  if (call) {
-                    call.on('stream', (remoteStream: MediaStream) => {
-                      setPeers((prev) => {
-                        const updated = new Map(prev);
-                        const existing = prev.get(sig.from);
-                        updated.set(sig.from, {
-                          peerId: sig.from,
-                          userId: sig.payload?.userId || sig.from,
-                          displayName: sig.payload?.displayName || 'Participant',
-                          stream: remoteStream,
-                          isAudioMuted: sig.payload?.isAudioMuted ?? existing?.isAudioMuted ?? false,
-                          isVideoOff: sig.payload?.isVideoOff ?? existing?.isVideoOff ?? false,
-                          isScreenSharing: sig.payload?.isScreenSharing ?? existing?.isScreenSharing ?? false,
+                    if (call) {
+                      call.on('stream', (remoteStream: MediaStream) => {
+                        setPeers((prev) => {
+                          const updated = new Map(prev);
+                          const existing = prev.get(sig.from);
+                          updated.set(sig.from, {
+                            peerId: sig.from,
+                            userId: sig.payload?.userId || sig.from,
+                            displayName: sig.payload?.displayName || 'Participant',
+                            stream: remoteStream,
+                            isAudioMuted: sig.payload?.isAudioMuted ?? existing?.isAudioMuted ?? false,
+                            isVideoOff: sig.payload?.isVideoOff ?? existing?.isVideoOff ?? false,
+                            isScreenSharing: sig.payload?.isScreenSharing ?? existing?.isScreenSharing ?? false,
+                          });
+                          return updated;
                         });
-                        return updated;
                       });
-                    });
 
-                    call.on('close', () => {
-                      setPeers((prev) => {
-                        const updated = new Map(prev);
-                        updated.delete(sig.from);
-                        return updated;
+                      call.on('close', () => {
+                        setPeers((prev) => {
+                          const updated = new Map(prev);
+                          updated.delete(sig.from);
+                          return updated;
+                        });
+                        activeCallsRef.current.delete(sig.from);
                       });
-                      activeCallsRef.current.delete(sig.from);
-                    });
 
-                    activeCallsRef.current.set(sig.from, call);
+                      activeCallsRef.current.set(sig.from, call);
+                    }
+                  }
+
+                  // Establish direct WebRTC DataChannel connection
+                  if (!activeDataConnectionsRef.current.has(sig.from)) {
+                    try {
+                      const conn = peerInstanceRef.current.connect(sig.from);
+                      conn.on('open', () => {
+                        activeDataConnectionsRef.current.set(sig.from, conn);
+                      });
+                      conn.on('data', (data: any) => {
+                        if (!isAlive || !data) return;
+                        if (data.type === 'chat-message' && data.message) {
+                          const incomingMsg = data.message;
+                          setMessages((prev) => {
+                            if (prev.some((m) => m._id === incomingMsg._id)) return prev;
+                            if (activePanelRef.current !== 'chat') {
+                              setUnreadCount((c) => c + 1);
+                            }
+                            return [...prev, incomingMsg];
+                          });
+                        }
+                      });
+                      conn.on('close', () => {
+                        activeDataConnectionsRef.current.delete(sig.from);
+                      });
+                    } catch (dcErr) {
+                      console.debug('DataChannel connect notice:', dcErr);
+                    }
                   }
                 }
               }
@@ -649,12 +737,13 @@ export default function MeetingRoom({
               else if (sig.type === 'peer-left') {
                 const call = activeCallsRef.current.get(sig.from);
                 if (call) {
-                  try {
-                    call.close();
-                  } catch {
-                    // ignore
-                  }
+                  try { call.close(); } catch {}
                   activeCallsRef.current.delete(sig.from);
+                }
+                const conn = activeDataConnectionsRef.current.get(sig.from);
+                if (conn) {
+                  try { conn.close(); } catch {}
+                  activeDataConnectionsRef.current.delete(sig.from);
                 }
                 setPeers((prev) => {
                   const updated = new Map(prev);
@@ -675,8 +764,12 @@ export default function MeetingRoom({
             }
           }
         }
+      } catch (sigErr) {
+        console.debug('Signaling sync notice:', sigErr);
+      }
 
-        // Periodic database message synchronization with ID deduplication
+      // 2. Periodic Database Message Sync (independent so signal failure never prevents delivery)
+      try {
         const chatRes = await fetch(`/api/meetings/${meeting.meetingCode}/messages`);
         if (chatRes.ok) {
           const chatData = await chatRes.json();
@@ -694,8 +787,12 @@ export default function MeetingRoom({
             });
           }
         }
+      } catch (chatErr) {
+        console.debug('Chat sync notice:', chatErr);
+      }
 
-        // Verify meeting lifecycle status
+      // 3. Verify meeting lifecycle status
+      try {
         const meetRes = await fetch(`/api/meetings/${meeting.meetingCode}`);
         if (meetRes.ok) {
           const meetData = await meetRes.json();
@@ -703,17 +800,20 @@ export default function MeetingRoom({
             setMeetingEndedNotice('This meeting has ended.');
           }
         }
-      } catch (err) {
-        console.warn('Signaling sync notice:', err);
+      } catch (meetErr) {
+        console.debug('Meeting status check notice:', meetErr);
       }
     };
 
-    const intervalId = setInterval(syncMeeting, 2200);
+    // Run initial sync immediately on mount
+    syncMeeting();
+
+    const intervalId = setInterval(syncMeeting, 1200);
     return () => {
       isAlive = false;
       clearInterval(intervalId);
     };
-  }, [meeting.meetingCode, userId, displayName]);
+  }, [meeting.meetingCode, userId, clientSessionId, displayName]);
 
   // Audio Toggle (Microphone) with reliable track lifecycle
   const handleToggleAudio = async () => {
@@ -936,6 +1036,7 @@ export default function MeetingRoom({
           text,
           senderName: displayName,
           senderUserId: userId,
+          senderSessionId: clientSessionId,
         }),
       });
 
@@ -948,18 +1049,31 @@ export default function MeetingRoom({
           return [...prev, savedMessage];
         });
 
-        const myPeerId = peerInstanceRef.current?.id;
-        if (myPeerId) {
-          fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              from: myPeerId,
-              type: 'chat-message',
-              payload: { message: savedMessage },
-            }),
-          }).catch(console.warn);
-        }
+        // Broadcast directly over active WebRTC DataConnections for instant peer delivery
+        activeDataConnectionsRef.current.forEach((conn) => {
+          if (conn.open) {
+            try {
+              conn.send({
+                type: 'chat-message',
+                payload: { message: savedMessage },
+              });
+            } catch (err) {
+              console.warn('DataConnection send error:', err);
+            }
+          }
+        });
+
+        // Also publish to Signal REST endpoint as guaranteed fallback
+        const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+        fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: senderFrom,
+            type: 'chat-message',
+            payload: { message: savedMessage },
+          }),
+        }).catch(console.warn);
       }
     } catch (err) {
       console.warn('Failed to send message:', err);
@@ -981,18 +1095,30 @@ export default function MeetingRoom({
       setFloatingReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
     }, 2800);
 
-    const myPeerId = peerInstanceRef.current?.id;
-    if (myPeerId) {
-      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: myPeerId,
-          type: 'peer-reaction',
-          payload: { emoji, senderName: displayName, xOffset },
-        }),
-      }).catch(console.warn);
-    }
+    // Direct WebRTC DataConnection broadcast
+    activeDataConnectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send({
+            type: 'peer-reaction',
+            payload: { emoji, senderName: displayName, xOffset },
+          });
+        } catch (e) {
+          console.warn('P2P reaction broadcast error:', e);
+        }
+      }
+    });
+
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        type: 'peer-reaction',
+        payload: { emoji, senderName: displayName, xOffset },
+      }),
+    }).catch(console.warn);
   };
 
   // React to a chat message
@@ -1017,18 +1143,30 @@ export default function MeetingRoom({
       })
     );
 
-    const myPeerId = peerInstanceRef.current?.id;
-    if (myPeerId) {
-      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: myPeerId,
-          type: 'chat-reaction',
-          payload: { messageId, emoji, userName: displayName },
-        }),
-      }).catch(console.warn);
-    }
+    // P2P DataChannel broadcast
+    activeDataConnectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send({
+            type: 'chat-reaction',
+            payload: { messageId, emoji, userName: displayName },
+          });
+        } catch (e) {
+          console.warn('P2P chat-reaction broadcast error:', e);
+        }
+      }
+    });
+
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        type: 'chat-reaction',
+        payload: { messageId, emoji, userName: displayName },
+      }),
+    }).catch(console.warn);
   };
 
   // Toggle Hand Raise
@@ -1036,37 +1174,55 @@ export default function MeetingRoom({
     const nextState = !isLocalHandRaised;
     setIsLocalHandRaised(nextState);
 
-    const myPeerId = peerInstanceRef.current?.id;
-    if (myPeerId) {
-      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: myPeerId,
-          type: 'peer-hand-raise',
-          payload: { isHandRaised: nextState },
-        }),
-      }).catch(console.warn);
-    }
+    // P2P DataChannel broadcast
+    activeDataConnectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send({
+            type: 'peer-hand-raise',
+            payload: { isHandRaised: nextState },
+          });
+        } catch (e) {
+          console.warn('P2P hand raise broadcast error:', e);
+        }
+      }
+    });
+
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        type: 'peer-hand-raise',
+        payload: { isHandRaised: nextState },
+      }),
+    }).catch(console.warn);
   };
 
   // Complete Leave and Hardware Media Release
   const handleLeaveMeeting = async () => {
-    const myPeerId = peerInstanceRef.current?.id;
-    if (myPeerId) {
-      fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: myPeerId,
-          type: 'peer-left',
-          payload: { userId },
-        }),
-      }).catch(console.warn);
-    }
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        type: 'peer-left',
+        payload: { userId },
+      }),
+    }).catch(console.warn);
 
     // Completely stop every media track so camera and mic indicators shut off
     stopAllMediaTracks();
+
+    // Close and clear all DataConnections
+    activeDataConnectionsRef.current.forEach((conn) => {
+      try {
+        conn.close();
+      } catch {}
+    });
+    activeDataConnectionsRef.current.clear();
 
     if (peerInstanceRef.current) {
       try {
@@ -1098,12 +1254,12 @@ export default function MeetingRoom({
         }),
       });
 
-      const myPeerId = peerInstanceRef.current?.id || userId;
+      const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
       fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: myPeerId,
+          from: senderFrom,
           type: 'meeting-ended',
           payload: {},
         }),
@@ -1117,6 +1273,26 @@ export default function MeetingRoom({
   };
 
   const handleMuteParticipant = (peerId: string) => {
+    const conn = activeDataConnectionsRef.current.get(peerId);
+    if (conn && conn.open) {
+      try {
+        conn.send({ type: 'mute-mic', payload: {} });
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        to: peerId,
+        type: 'mute-mic',
+        payload: {},
+      }),
+    }).catch(console.warn);
+
     setPeers((prev) => {
       const updated = new Map(prev);
       const peer = updated.get(peerId);
@@ -1128,6 +1304,26 @@ export default function MeetingRoom({
   };
 
   const handleKickParticipant = (peerId: string) => {
+    const conn = activeDataConnectionsRef.current.get(peerId);
+    if (conn && conn.open) {
+      try {
+        conn.send({ type: 'kick-peer', payload: {} });
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    const senderFrom = peerInstanceRef.current?.id || clientSessionId || userId;
+    fetch(`/api/meetings/${meeting.meetingCode}/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: senderFrom,
+        to: peerId,
+        type: 'kick-peer',
+        payload: {},
+      }),
+    }).catch(console.warn);
+
     const call = activeCallsRef.current.get(peerId);
     if (call) {
       try {
@@ -1498,12 +1694,12 @@ export default function MeetingRoom({
           )}
         </main>
 
-        {/* Sidebar Layout Slot - Takes actual layout space on the right, animated width expansion */}
+        {/* Desktop Sidebar Layout Slot - Sits side-by-side with video grid on sm+ screens */}
         <div
-          className={`meeting-sidebar-slot shrink-0 flex flex-col ${
+          className={`hidden sm:flex meeting-sidebar-slot shrink-0 flex-col ${
             activePanel !== 'none'
-              ? 'w-full sm:w-84 md:w-92 lg:w-96 opacity-100 max-sm:h-[45vh] sm:h-full mt-2 sm:mt-0'
-              : 'w-0 opacity-0 pointer-events-none max-sm:h-0 sm:h-full overflow-hidden'
+              ? 'w-80 md:w-88 lg:w-96 opacity-100 h-full'
+              : 'w-0 opacity-0 pointer-events-none h-full overflow-hidden'
           }`}
         >
           {activePanel !== 'none' && (
@@ -1518,6 +1714,7 @@ export default function MeetingRoom({
               messages={messages}
               currentUserId={userId}
               currentDisplayName={displayName}
+              clientSessionId={clientSessionId}
               onSendMessage={handleSendMessage}
               onReactToMessage={handleReactToMessage}
               unreadCount={unreadCount}
@@ -1536,6 +1733,51 @@ export default function MeetingRoom({
           )}
         </div>
       </div>
+
+      {/* Mobile Bottom-Sheet Drawer Overlay - Elevates above controls without clipping or shrinking video */}
+      {activePanel !== 'none' && (
+        <div className="fixed inset-0 z-50 sm:hidden flex flex-col justify-end bg-black/65 backdrop-blur-xs animate-in fade-in duration-200">
+          {/* Backdrop click to dismiss */}
+          <div className="absolute inset-0" onClick={() => setActivePanel('none')} />
+
+          {/* Drawer Container */}
+          <div className="relative z-10 w-full max-h-[88dvh] h-[85dvh] bg-[#16181f] border-t border-[#242732] rounded-t-3xl flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-300">
+            {/* Drag Handle Pill */}
+            <div className="w-full flex justify-center pt-2.5 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-slate-600/70" />
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              <FloatingSidebar
+                className="h-full w-full bg-transparent flex flex-col overflow-hidden"
+                activePanel={activePanel}
+                onSwitchPanel={(panel) => {
+                  setActivePanel(panel);
+                  if (panel === 'chat') setUnreadCount(0);
+                }}
+                onClose={() => setActivePanel('none')}
+                messages={messages}
+                currentUserId={userId}
+                currentDisplayName={displayName}
+                clientSessionId={clientSessionId}
+                onSendMessage={handleSendMessage}
+                onReactToMessage={handleReactToMessage}
+                unreadCount={unreadCount}
+                isHost={isHost}
+                localAudioMuted={isAudioMuted}
+                localVideoOff={isVideoOff}
+                localHandRaised={isLocalHandRaised}
+                remotePeers={remotePeersList}
+                remoteHands={remoteHands}
+                meetingCode={meeting.meetingCode}
+                onMuteParticipant={handleMuteParticipant}
+                onKickParticipant={handleKickParticipant}
+                onMuteAll={() => remotePeersList.forEach((p) => handleMuteParticipant(p.peerId))}
+                meeting={meeting}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Bottom Control Bar */}
       <MeetingControls

@@ -19,6 +19,7 @@ interface FloatingSidebarProps {
   // Chat props
   messages: IMessage[];
   currentUserId: string;
+  clientSessionId?: string;
   currentDisplayName: string;
   onSendMessage: (text: string) => void;
   onReactToMessage?: (messageId: string, emoji: string) => void;
@@ -45,6 +46,7 @@ export default function FloatingSidebar({
   onClose,
   messages,
   currentUserId,
+  clientSessionId,
   currentDisplayName,
   onSendMessage,
   onReactToMessage,
@@ -158,6 +160,7 @@ export default function FloatingSidebar({
           <ChatPanel
             messages={messages}
             currentUserId={currentUserId}
+            clientSessionId={clientSessionId}
             currentDisplayName={currentDisplayName}
             onSendMessage={onSendMessage}
             onReactToMessage={onReactToMessage}

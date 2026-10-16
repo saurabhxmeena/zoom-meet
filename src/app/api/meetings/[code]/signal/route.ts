@@ -11,9 +11,10 @@ export async function POST(
     const { code } = await params;
     const body = await req.json();
     const { from, to, type, payload } = body;
+    const resolvedFrom = from || body.senderSessionId || body.userId || 'anon_' + Math.random().toString(36).substring(2, 8);
 
-    if (!from || !type) {
-      return NextResponse.json({ error: 'Missing signal parameters' }, { status: 400 });
+    if (!type) {
+      return NextResponse.json({ error: 'Missing signal type' }, { status: 400 });
     }
 
     const timestamp = Date.now();
@@ -25,7 +26,7 @@ export async function POST(
     }
     const queue = inMemoryStore.signals.get(code)!;
     queue.push({
-      from,
+      from: resolvedFrom,
       to: toTarget,
       type,
       payload,
@@ -41,7 +42,7 @@ export async function POST(
       if (dbReady) {
         await SignalModel.create({
           meetingCode: code,
-          from,
+          from: resolvedFrom,
           to: toTarget,
           type,
           payload,
@@ -65,7 +66,7 @@ export async function GET(
   try {
     const { code } = await params;
     const { searchParams } = new URL(req.url);
-    const peerId = searchParams.get('peerId');
+    const peerId = searchParams.get('peerId')?.trim();
     const since = parseInt(searchParams.get('since') || '0', 10);
 
     try {
@@ -98,7 +99,7 @@ export async function GET(
     // In-memory fallback
     const queue = inMemoryStore.signals.get(code) || [];
     const messages = queue.filter(
-      (item) => item.timestamp > since && item.from !== peerId && (item.to === 'all' || item.to === peerId)
+      (item) => item.timestamp > since && (!peerId || item.from !== peerId) && (item.to === 'all' || item.to === peerId)
     );
 
     return NextResponse.json({ signals: messages, serverTime: Date.now() });

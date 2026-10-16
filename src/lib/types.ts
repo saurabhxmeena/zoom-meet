@@ -31,6 +31,7 @@ export interface IMessage {
   _id: string;
   meetingId: string;
   senderUserId: string;
+  senderSessionId?: string;
   senderName: string;
   text: string;
   reactions?: Record<string, string[]>; // emoji -> array of sender displayNames

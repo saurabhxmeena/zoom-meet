@@ -8,6 +8,7 @@ import EmojiPicker from './EmojiPicker';
 interface ChatPanelProps {
   messages: IMessage[];
   currentUserId: string;
+  clientSessionId?: string;
   currentDisplayName: string;
   onSendMessage: (text: string) => void;
   onReactToMessage?: (messageId: string, emoji: string) => void;
@@ -21,6 +22,7 @@ const MESSAGE_REACTION_OPTIONS = ['❤️', '👍', '😂', '🎉', '🔥'];
 export default function ChatPanel({
   messages,
   currentUserId,
+  clientSessionId,
   currentDisplayName,
   onSendMessage,
   onReactToMessage,
@@ -32,13 +34,20 @@ export default function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   useEffect(() => {
-    scrollToBottom();
+    scrollToBottom('smooth');
   }, [messages]);
+
+  const handleFocus = () => {
+    // On mobile virtual keyboard open, scroll message history into visible frame
+    setTimeout(() => {
+      scrollToBottom('smooth');
+    }, 280);
+  };
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -113,7 +122,9 @@ export default function ChatPanel({
           </div>
         ) : (
           messages.map((msg) => {
-            const isMe = msg.senderUserId === currentUserId;
+            const isMe = clientSessionId && msg.senderSessionId
+              ? msg.senderSessionId === clientSessionId
+              : msg.senderUserId === currentUserId;
             const time = new Date(msg.createdAt).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
@@ -197,7 +208,7 @@ export default function ChatPanel({
       </div>
 
       {/* Input bar with Quick Emojis & Emoji Picker */}
-      <div className="relative p-2.5 sm:p-3 border-t border-[#242732] bg-[#16181f]">
+      <div className="relative p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-[#242732] bg-[#16181f] shrink-0">
         {showEmojiPicker && (
           <EmojiPicker
             onSelectEmoji={handleSelectEmoji}
@@ -213,7 +224,7 @@ export default function ChatPanel({
               key={emoji}
               type="button"
               onClick={() => handleSelectEmoji(emoji)}
-              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#1e212b] text-sm hover:scale-115 active:scale-95 transition shrink-0"
+              className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center rounded-md hover:bg-[#1e212b] text-base sm:text-sm hover:scale-115 active:scale-95 transition shrink-0"
               title={`Insert ${emoji}`}
             >
               {emoji}
@@ -226,7 +237,7 @@ export default function ChatPanel({
           <button
             type="button"
             onClick={() => setShowEmojiPicker((prev) => !prev)}
-            className={`p-2 rounded-lg transition shrink-0 ${
+            className={`p-2.5 sm:p-2 rounded-lg transition shrink-0 ${
               showEmojiPicker
                 ? 'bg-[#2563eb] text-white'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e212b]'
@@ -244,15 +255,17 @@ export default function ChatPanel({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={handleFocus}
+            autoComplete="off"
             placeholder="Message everyone..."
-            className="flex-1 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f8fafc] placeholder-slate-500 transition"
+            className="flex-1 bg-[#0e1015] border border-[#242732] focus:border-[#2563eb] focus:outline-none rounded-lg px-3 py-2 text-sm sm:text-xs text-[#f8fafc] placeholder-slate-500 transition"
           />
 
           {/* Send button */}
           <button
             type="submit"
             disabled={!inputText.trim()}
-            className="w-8 h-8 rounded-lg bg-[#2563eb] hover:bg-blue-700 active:scale-95 disabled:opacity-30 disabled:hover:bg-[#2563eb] text-white flex items-center justify-center transition shrink-0"
+            className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-[#2563eb] hover:bg-blue-700 active:scale-95 disabled:opacity-30 disabled:hover:bg-[#2563eb] text-white flex items-center justify-center transition shrink-0"
             title="Send message"
           >
             <ArrowUp className="w-4 h-4" />
